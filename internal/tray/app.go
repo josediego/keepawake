@@ -18,6 +18,7 @@ type App struct {
 
 	statusItem *systray.MenuItem
 	cancelItem *systray.MenuItem
+	quitItem   *systray.MenuItem
 }
 
 // NewApp builds a tray application bound to the provided manager.
@@ -64,12 +65,13 @@ func (a *App) onReady(ctx context.Context) {
 	a.cancelItem = systray.AddMenuItem("Stop", "Stop the current keepawake session")
 	a.cancelItem.Disable()
 	systray.AddSeparator()
-	quitItem := systray.AddMenuItem("Quit tray", "Close the Keepawake icon")
+	a.quitItem = systray.AddMenuItem("Quit tray", "Close the Keepawake icon")
+	a.quitItem.Enable()
 
-	go a.watchState(ctx, quitItem)
+	go a.watchState(ctx)
 }
 
-func (a *App) watchState(ctx context.Context, quitItem *systray.MenuItem) {
+func (a *App) watchState(ctx context.Context) {
 	ticker := time.NewTicker(a.pollInterval)
 	defer ticker.Stop()
 
@@ -82,7 +84,7 @@ func (a *App) watchState(ctx context.Context, quitItem *systray.MenuItem) {
 			a.refresh()
 		case <-a.cancelItem.ClickedCh:
 			a.handleCancel()
-		case <-quitItem.ClickedCh:
+		case <-a.quitItem.ClickedCh:
 			systray.Quit()
 			return
 		case <-ctx.Done():
@@ -119,6 +121,19 @@ func (a *App) refresh() {
 	default:
 		log.Printf("tray: could not read state: %v", err)
 	}
+
+	a.updateQuitVisibility(err)
+}
+
+func (a *App) updateQuitVisibility(err error) {
+	if a.quitItem == nil {
+		return
+	}
+	if errors.Is(err, keepawake.ErrStateNotFound) {
+		a.quitItem.Enable()
+		return
+	}
+	a.quitItem.Disable()
 }
 
 func (a *App) handleCancel() {

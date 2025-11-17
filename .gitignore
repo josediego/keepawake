@@ -1,0 +1,23 @@
+# Binaries
+/keepawake
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Dependency/vendor artifacts
+/vendor/
+
+# Build cache / tooling
+/bin/
+/dist/
+
+# macOS
+.DS_Store
+
+# Env / local overrides
+.env
+

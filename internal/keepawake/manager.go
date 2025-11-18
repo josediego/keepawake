@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -165,16 +166,45 @@ func (m *Manager) readState() (*state, error) {
 }
 
 // CurrentState returns the exported state information if present.
+// It automatically cleans up stale state if the time has passed or the process is dead.
 func (m *Manager) CurrentState() (*State, error) {
 	s, err := m.readState()
 	if err != nil {
 		return nil, err
 	}
 
+	untilTime := time.Unix(s.Until, 0)
+	now := m.now()
+
+	// Check if time has passed
+	if now.After(untilTime) {
+		_ = m.removeStateFile()
+		return nil, ErrStateNotFound
+	}
+
+	// Check if process is still alive
+	if !isProcessAlive(s.PID) {
+		_ = m.removeStateFile()
+		return nil, ErrStateNotFound
+	}
+
 	return &State{
 		PID:   s.PID,
-		Until: time.Unix(s.Until, 0),
+		Until: untilTime,
 	}, nil
+}
+
+func isProcessAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	// Signal 0 doesn't actually send a signal, but checks if the process exists
+	err = proc.Signal(syscall.Signal(0))
+	return err == nil
 }
 
 func (m *Manager) removeStateFile() error {

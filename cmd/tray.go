@@ -5,17 +5,23 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/jose/keepawake/internal/tray"
 	"github.com/spf13/cobra"
 )
 
 func newTrayCommand(deps trayDeps) *cobra.Command {
-	return &cobra.Command{
+	var noNotify bool
+	cmd := &cobra.Command{
 		Use:   "tray",
 		Short: "Start a status bar icon to view the status of Keepawake",
 		Long: `Starts a persistent process in the status bar (menubar) that shows if Keepawake
 is active and until what time the system will stay awake. Quit the app from the icon's menu.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			app, err := deps.newApp()
+			var opts []tray.Option
+			if noNotify {
+				opts = append(opts, tray.WithoutNotifications())
+			}
+			app, err := deps.newApp(opts...)
 			if err != nil {
 				return err
 			}
@@ -41,4 +47,6 @@ is active and until what time the system will stay awake. Quit the app from the 
 			return app.Run(ctx)
 		},
 	}
+	cmd.Flags().BoolVar(&noNotify, "no-notify", false, "Do not show a notification when a session ends")
+	return cmd
 }

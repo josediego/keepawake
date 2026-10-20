@@ -11,6 +11,8 @@ import (
 )
 
 func newForCommand(deps sessionDeps) *cobra.Command {
+	var modes *modeFlags
+
 	cmd := &cobra.Command{
 		Use:   "for <duration>",
 		Short: "Keep your Mac awake for the provided duration",
@@ -25,7 +27,7 @@ The command delegates to macOS caffeinate under the hood.`,
 				return err
 			}
 
-			manager, err := deps.manager()
+			manager, err := deps.manager(modes.mode())
 			if err != nil {
 				return err
 			}
@@ -44,6 +46,8 @@ The command delegates to macOS caffeinate under the hood.`,
   keepawake for 1h 30m
   keepawake for 90`,
 	}
+
+	modes = addModeFlags(cmd)
 
 	return cmd
 }

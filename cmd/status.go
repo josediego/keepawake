@@ -82,6 +82,7 @@ type activeStatus struct {
 	PID              int    `json:"pid"`
 	Until            string `json:"until"`
 	RemainingSeconds int64  `json:"remaining_seconds"`
+	Mode             string `json:"mode"`
 }
 
 // inactiveStatus is the JSON form when no session is active.
@@ -103,6 +104,7 @@ func statusJSON(state *keepawake.State, now time.Time) ([]byte, error) {
 		PID:              state.PID,
 		Until:            until.Format(time.RFC3339),
 		RemainingSeconds: int64(remaining / time.Second),
+		Mode:             statusMode(state.Mode).String(),
 	})
 }
 
@@ -115,8 +117,20 @@ func formatStatus(state *keepawake.State, now time.Time) string {
 	until := state.Until.In(now.Location())
 	remaining := max(until.Sub(now), 0)
 
-	return fmt.Sprintf("Active until %s (%s left, PID %d)",
+	s := fmt.Sprintf("Active until %s (%s left, PID %d",
 		formatUntil(now, until),
 		humanDuration(remaining),
 		state.PID)
+	if mode := statusMode(state.Mode); mode != keepawake.DefaultMode {
+		s += ", mode " + mode.String()
+	}
+	return s + ")"
+}
+
+// statusMode returns the mode to show for m: the zero Mode, as in a State built by hand, is DefaultMode.
+func statusMode(m keepawake.Mode) keepawake.Mode {
+	if m == (keepawake.Mode{}) {
+		return keepawake.DefaultMode
+	}
+	return m
 }

@@ -29,6 +29,7 @@ type untilDeps struct {
 
 func newUntilCommand(deps sessionDeps) *cobra.Command {
 	var yes bool
+	var modes *modeFlags
 
 	cmd := &cobra.Command{
 		Use:   "until <time>",
@@ -38,7 +39,7 @@ A time that already passed today means tomorrow, after confirmation (or --yes).
 The command delegates to macOS caffeinate under the hood.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			manager, err := deps.manager()
+			manager, err := deps.manager(modes.mode())
 			if err != nil {
 				return err
 			}
@@ -64,6 +65,7 @@ The command delegates to macOS caffeinate under the hood.`,
 	}
 
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "roll a passed time over to tomorrow without asking")
+	modes = addModeFlags(cmd)
 
 	return cmd
 }

@@ -3,7 +3,6 @@ package tray
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"time"
 
@@ -19,6 +18,8 @@ type App struct {
 	statusItem *systray.MenuItem
 	cancelItem *systray.MenuItem
 	quitItem   *systray.MenuItem
+
+	lastActive bool
 }
 
 // NewApp builds a tray application bound to the provided manager.
@@ -95,45 +96,45 @@ func (a *App) watchState(ctx context.Context) {
 
 func (a *App) refresh() {
 	state, err := a.manager.CurrentState()
-	switch {
-	case err == nil:
-		until := state.Until.Local()
-
-		systray.SetIcon(iconActive)
-		systray.SetTemplateIcon(iconActive, iconActive)
-		systray.SetTooltip(fmt.Sprintf("Keepawake active until %s", until.Format(time.Kitchen)))
-		if a.statusItem != nil {
-			a.statusItem.SetTitle(fmt.Sprintf("Active until %s", until.Format(time.Kitchen)))
-		}
-		if a.cancelItem != nil {
-			a.cancelItem.Enable()
-		}
-	case errors.Is(err, keepawake.ErrStateNotFound):
-		systray.SetIcon(iconInactive)
-		systray.SetTemplateIcon(iconInactive, iconInactive)
-		systray.SetTooltip("Keepawake inactive")
-		if a.statusItem != nil {
-			a.statusItem.SetTitle("Status: inactive")
-		}
-		if a.cancelItem != nil {
-			a.cancelItem.Disable()
-		}
-	default:
+	if err != nil && !errors.Is(err, keepawake.ErrStateNotFound) {
 		log.Printf("tray: could not read state: %v", err)
 	}
 
-	a.updateQuitVisibility(err)
+	v := buildView(state, err, time.Now())
+	if icon, changed := a.iconChange(v.Active); changed {
+		systray.SetIcon(icon)
+		systray.SetTemplateIcon(icon, icon)
+	}
+	systray.SetTitle(v.Title)
+	systray.SetTooltip(v.Tooltip)
+	if a.statusItem != nil {
+		a.statusItem.SetTitle(v.StatusText)
+	}
+	setEnabled(a.cancelItem, v.CancelEnabled)
+	setEnabled(a.quitItem, v.QuitEnabled)
 }
 
-func (a *App) updateQuitVisibility(err error) {
-	if a.quitItem == nil {
+// iconChange reports the icon to set when the active state differs from the last one.
+func (a *App) iconChange(active bool) (icon []byte, changed bool) {
+	if active == a.lastActive {
+		return nil, false
+	}
+	a.lastActive = active
+	if active {
+		return iconActive, true
+	}
+	return iconInactive, true
+}
+
+func setEnabled(item *systray.MenuItem, enabled bool) {
+	if item == nil {
 		return
 	}
-	if errors.Is(err, keepawake.ErrStateNotFound) {
-		a.quitItem.Enable()
+	if enabled {
+		item.Enable()
 		return
 	}
-	a.quitItem.Disable()
+	item.Disable()
 }
 
 func (a *App) handleCancel() {

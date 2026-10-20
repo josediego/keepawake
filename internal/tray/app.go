@@ -20,14 +20,33 @@ type App struct {
 	quitItem   *systray.MenuItem
 
 	lastActive bool
+
+	last            session
+	stoppedFromTray bool
+	notifier        Notifier // nil disables notifications
+}
+
+// Option customizes an App.
+type Option func(*App)
+
+// WithoutNotifications stops the tray from notifying when a session ends.
+func WithoutNotifications() Option {
+	return func(a *App) {
+		a.notifier = nil
+	}
 }
 
 // NewApp builds a tray application bound to the provided manager.
-func NewApp(manager *keepawake.Manager) *App {
-	return &App{
+func NewApp(manager *keepawake.Manager, opts ...Option) *App {
+	a := &App{
 		manager:      manager,
 		pollInterval: 5 * time.Second,
+		notifier:     osascriptNotifier{},
 	}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
 }
 
 // Run starts the tray loop and blocks until the app exits or context is cancelled.
@@ -100,7 +119,12 @@ func (a *App) refresh() {
 		log.Printf("tray: could not read state: %v", err)
 	}
 
-	v := buildView(state, err, time.Now())
+	now := time.Now()
+	if msg, _ := a.observe(state, err, now); msg != "" {
+		a.notify(msg)
+	}
+
+	v := buildView(state, err, now)
 	if icon, changed := a.iconChange(v.Active); changed {
 		systray.SetIcon(icon)
 		systray.SetTemplateIcon(icon, icon)
@@ -126,6 +150,18 @@ func (a *App) iconChange(active bool) (icon []byte, changed bool) {
 	return iconInactive, true
 }
 
+// notify shows msg in the background, so osascript never blocks the menu loop.
+func (a *App) notify(msg string) {
+	if a.notifier == nil {
+		return
+	}
+	go func() {
+		if err := a.notifier.Notify(notificationTitle, msg); err != nil {
+			log.Printf("tray: could not notify: %v", err)
+		}
+	}()
+}
+
 func setEnabled(item *systray.MenuItem, enabled bool) {
 	if item == nil {
 		return
@@ -138,7 +174,7 @@ func setEnabled(item *systray.MenuItem, enabled bool) {
 }
 
 func (a *App) handleCancel() {
-	pid, err := a.manager.Cancel()
+	pid, err := a.stopFromTray()
 	switch {
 	case err == nil:
 		log.Printf("tray: cancelled keepawake (pid %d)", pid)

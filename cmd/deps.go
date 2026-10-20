@@ -42,18 +42,18 @@ var _ trayRunner = (*tray.App)(nil)
 
 // trayDeps holds what the tray command needs from the outside world, so tests can fake them.
 type trayDeps struct {
-	newApp func() (trayRunner, error)
+	newApp func(opts ...tray.Option) (trayRunner, error)
 	guard  func(pid int) (cleanup func() error, existingPID int, alreadyRunning bool, err error)
 }
 
 func defaultTrayDeps() trayDeps {
 	return trayDeps{
-		newApp: func() (trayRunner, error) {
+		newApp: func(opts ...tray.Option) (trayRunner, error) {
 			manager, err := keepawake.NewManager()
 			if err != nil {
 				return nil, err
 			}
-			return tray.NewApp(manager), nil
+			return tray.NewApp(manager, opts...), nil
 		},
 		guard: tray.ForegroundPIDGuard,
 	}

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jose/keepawake/internal/tray"
 	"github.com/spf13/cobra"
 )
 
@@ -125,7 +126,7 @@ func TestTrayCommandWritesToRealStreams(t *testing.T) {
 	t.Run("already running", func(t *testing.T) {
 		app := &fakeApp{}
 		cmd := newTrayCommand(trayDeps{
-			newApp: func() (trayRunner, error) { return app, nil },
+			newApp: func(...tray.Option) (trayRunner, error) { return app, nil },
 			guard: func(int) (func() error, int, bool, error) {
 				return nil, 77, true, nil
 			},
@@ -151,7 +152,7 @@ func TestTrayCommandWritesToRealStreams(t *testing.T) {
 		app := &fakeApp{}
 		cleanups := 0
 		cmd := newTrayCommand(trayDeps{
-			newApp: func() (trayRunner, error) { return app, nil },
+			newApp: func(...tray.Option) (trayRunner, error) { return app, nil },
 			guard: func(int) (func() error, int, bool, error) {
 				return func() error { cleanups++; return nil }, 0, false, nil
 			},

@@ -36,9 +36,7 @@ The command delegates to macOS caffeinate under the hood.`,
 			}
 
 			fmt.Fprintf(cmd.OutOrStdout(), "Keepawake active (PID %d) for %s (until %s)\n", pid, humanDuration(d), formatUntil(time.Now(), end))
-			if err := deps.launchTray(); err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not launch tray: %v\n", err)
-			}
+			startTray(cmd, deps.launchTray)
 			return nil
 		},
 		Example: `  keepawake for 45m

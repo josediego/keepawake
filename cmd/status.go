@@ -7,17 +7,15 @@ import (
 	"time"
 
 	"github.com/jose/keepawake/internal/keepawake"
-	"github.com/jose/keepawake/internal/tray"
 	"github.com/spf13/cobra"
 )
 
 // ErrInactive is returned by `status --quiet` when no session is active.
 var ErrInactive = errors.New("keepawake is inactive")
 
-// statusDeps holds what the status command reads and launches, so tests can fake them.
+// statusDeps holds what the status command reads, so tests can fake them.
 type statusDeps struct {
 	currentState func() (*keepawake.State, error)
-	launchTray   func() error
 	now          func() time.Time
 }
 
@@ -30,8 +28,7 @@ func newStatusCommand() *cobra.Command {
 			}
 			return manager.CurrentState()
 		},
-		launchTray: tray.EnsureRunning,
-		now:        time.Now,
+		now: time.Now,
 	})
 }
 
@@ -68,13 +65,6 @@ func newStatusCommandWith(deps statusDeps) *cobra.Command {
 			}
 
 			fmt.Fprintln(cmd.OutOrStdout(), formatStatus(state, deps.now()))
-
-			if state != nil {
-				if err := deps.launchTray(); err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not launch tray: %v\n", err)
-				}
-			}
-
 			return nil
 		},
 	}

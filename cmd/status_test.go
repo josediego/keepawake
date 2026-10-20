@@ -117,15 +117,11 @@ func TestStatusJSON(t *testing.T) {
 	}
 }
 
-// fakeStatusCommand builds the status command from fakes, counting launcher runs in *launches.
-func fakeStatusCommand(state *keepawake.State, stateErr, launchErr error, launches *int) *cobra.Command {
+// fakeStatusCommand builds the status command from fakes; it has no launcher, so it cannot start the tray.
+func fakeStatusCommand(state *keepawake.State, stateErr error) *cobra.Command {
 	cmd := newStatusCommandWith(statusDeps{
 		currentState: func() (*keepawake.State, error) { return state, stateErr },
-		launchTray: func() error {
-			*launches++
-			return launchErr
-		},
-		now: func() time.Time { return statusNow },
+		now:          func() time.Time { return statusNow },
 	})
 	cmd.SetArgs([]string{})
 	return cmd
@@ -136,23 +132,17 @@ func TestStatusCommand(t *testing.T) {
 	readErr := errors.New("permission denied")
 
 	tests := []struct {
-		name         string
-		args         []string
-		state        *keepawake.State
-		stateErr     error
-		launchErr    error
-		wantOut      string
-		wantErrOut   string
-		wantErr      error
-		wantLaunches int
+		name     string
+		args     []string
+		state    *keepawake.State
+		stateErr error
+		wantOut  string
+		wantErr  error
 	}{
 		{
-			name:         "active",
-			state:        active,
-			launchErr:    errors.New("boom"),
-			wantOut:      "Active until 17:30 (1h 5m left, PID 123)\n",
-			wantErrOut:   "Warning: could not launch tray: boom\n",
-			wantLaunches: 1,
+			name:    "active",
+			state:   active,
+			wantOut: "Active until 17:30 (1h 5m left, PID 123)\n",
 		},
 		{
 			name:     "inactive",
@@ -170,11 +160,10 @@ func TestStatusCommand(t *testing.T) {
 			wantErr:  readErr,
 		},
 		{
-			name:      "json active",
-			args:      []string{"--json"},
-			state:     active,
-			launchErr: errors.New("boom"),
-			wantOut:   `{"active":true,"pid":123,"until":"2026-03-10T17:30:00-05:00","remaining_seconds":3900}` + "\n",
+			name:    "json active",
+			args:    []string{"--json"},
+			state:   active,
+			wantOut: `{"active":true,"pid":123,"until":"2026-03-10T17:30:00-05:00","remaining_seconds":3900}` + "\n",
 		},
 		{
 			name:     "json inactive",
@@ -210,8 +199,7 @@ func TestStatusCommand(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var out, errOut bytes.Buffer
-			launches := 0
-			cmd := fakeStatusCommand(tc.state, tc.stateErr, tc.launchErr, &launches)
+			cmd := fakeStatusCommand(tc.state, tc.stateErr)
 			if tc.args != nil {
 				cmd.SetArgs(tc.args)
 			}
@@ -224,11 +212,8 @@ func TestStatusCommand(t *testing.T) {
 			if got := out.String(); got != tc.wantOut {
 				t.Errorf("stdout = %q, want %q", got, tc.wantOut)
 			}
-			if got := errOut.String(); got != tc.wantErrOut {
-				t.Errorf("stderr = %q, want %q", got, tc.wantErrOut)
-			}
-			if launches != tc.wantLaunches {
-				t.Errorf("launcher ran %d times, want %d", launches, tc.wantLaunches)
+			if got := errOut.String(); got != "" {
+				t.Errorf("stderr = %q, want empty", got)
 			}
 		})
 	}
@@ -236,9 +221,8 @@ func TestStatusCommand(t *testing.T) {
 
 func TestStatusCommandJSONAndQuietExclusive(t *testing.T) {
 	var out, errOut bytes.Buffer
-	launches := 0
 	active := &keepawake.State{PID: 123, Until: time.Date(2026, time.March, 10, 17, 30, 0, 0, statusZone)}
-	cmd := fakeStatusCommand(active, nil, nil, &launches)
+	cmd := fakeStatusCommand(active, nil)
 	cmd.SetArgs([]string{"--json", "--quiet"})
 	cmd.SetOut(&out)
 	cmd.SetErr(&errOut)
@@ -248,9 +232,6 @@ func TestStatusCommandJSONAndQuietExclusive(t *testing.T) {
 	}
 	if got := out.String(); got != "" {
 		t.Errorf("stdout = %q, want empty", got)
-	}
-	if launches != 0 {
-		t.Errorf("launcher ran %d times, want 0", launches)
 	}
 }
 
@@ -269,9 +250,8 @@ func TestStatusCommandWritesToRealStreams(t *testing.T) {
 	t.Cleanup(restore)
 	os.Stdout, os.Stderr = stdoutW, stderrW
 
-	launches := 0
 	active := &keepawake.State{PID: 123, Until: time.Date(2026, time.March, 10, 17, 30, 0, 0, statusZone)}
-	execErr := fakeStatusCommand(active, nil, errors.New("boom"), &launches).Execute()
+	execErr := fakeStatusCommand(active, nil).Execute()
 
 	restore()
 	stdoutW.Close()
@@ -293,7 +273,7 @@ func TestStatusCommandWritesToRealStreams(t *testing.T) {
 	if want := "Active until 17:30 (1h 5m left, PID 123)\n"; string(gotOut) != want {
 		t.Errorf("stdout = %q, want %q", gotOut, want)
 	}
-	if want := "Warning: could not launch tray: boom\n"; string(gotErr) != want {
-		t.Errorf("stderr = %q, want %q", gotErr, want)
+	if len(gotErr) != 0 {
+		t.Errorf("stderr = %q, want empty", gotErr)
 	}
 }

@@ -54,9 +54,7 @@ The command delegates to macOS caffeinate under the hood.`,
 				return err
 			}
 
-			if err := deps.launchTray(); err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not launch tray: %v\n", err)
-			}
+			startTray(cmd, deps.launchTray)
 			return nil
 		},
 		Example: `  keepawake until 17:00

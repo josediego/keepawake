@@ -7,11 +7,10 @@ import (
 	"time"
 
 	"github.com/jose/keepawake/internal/keepawake"
-	"github.com/jose/keepawake/internal/tray"
 	"github.com/spf13/cobra"
 )
 
-func newForCommand() *cobra.Command {
+func newForCommand(deps sessionDeps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "for <duration>",
 		Short: "Keep your Mac awake for the provided duration",
@@ -26,7 +25,7 @@ The command delegates to macOS caffeinate under the hood.`,
 				return err
 			}
 
-			manager, err := keepawake.NewManager()
+			manager, err := deps.manager()
 			if err != nil {
 				return err
 			}
@@ -36,9 +35,9 @@ The command delegates to macOS caffeinate under the hood.`,
 				return err
 			}
 
-			cmd.Printf("Keepawake active (PID %d) for %s (until %s)\n", pid, humanDuration(d), formatUntil(time.Now(), end))
-			if err := tray.EnsureRunning(); err != nil {
-				cmd.Printf("Warning: could not launch tray: %v\n", err)
+			fmt.Fprintf(cmd.OutOrStdout(), "Keepawake active (PID %d) for %s (until %s)\n", pid, humanDuration(d), formatUntil(time.Now(), end))
+			if err := deps.launchTray(); err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not launch tray: %v\n", err)
 			}
 			return nil
 		},

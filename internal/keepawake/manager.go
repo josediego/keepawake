@@ -30,6 +30,12 @@ var ErrStateNotFound = errors.New("no keepawake active (state file not found)")
 // ErrInvalidState is returned when the state file exists but is corrupt or incomplete.
 var ErrInvalidState = errors.New("invalid keepawake state file")
 
+// MinDuration and MaxDuration bound the durations accepted by For.
+const (
+	MinDuration = time.Minute
+	MaxDuration = 24 * time.Hour
+)
+
 // WithStateFile overrides the default state file path.
 func WithStateFile(path string) Option {
 	return func(m *Manager) {
@@ -80,26 +86,67 @@ func (m *Manager) Until(target string) (int, time.Duration, error) {
 		return 0, 0, err
 	}
 
-	duration := targetTime.Sub(now)
+	pid, err := m.start(now, targetTime)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return pid, targetTime.Sub(now), nil
+}
+
+// For starts caffeinate for d, replacing any running session.
+// It returns the pid that was started and the time the session ends.
+func (m *Manager) For(d time.Duration) (int, time.Time, error) {
+	if d < MinDuration || d > MaxDuration {
+		return 0, time.Time{}, fmt.Errorf("duration %s out of range (%s to %s)", d, MinDuration, MaxDuration)
+	}
+
+	now := m.now()
+	until := now.Add(d)
+	pid, err := m.start(now, until)
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+
+	return pid, until, nil
+}
+
+// StartUntil is the typed counterpart of Until: it starts caffeinate until t,
+// replacing any running session.
+// It returns the pid that was started and the duration until t.
+func (m *Manager) StartUntil(t time.Time) (int, time.Duration, error) {
+	now := m.now()
+	pid, err := m.start(now, t)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return pid, t.Sub(now), nil
+}
+
+// start replaces any running session with a caffeinate process lasting from
+// now until target, and saves its state. It is the only place that runs caffeinate.
+func (m *Manager) start(now, target time.Time) (int, error) {
+	duration := target.Sub(now)
 	if duration < time.Second {
-		return 0, 0, errors.New("target time is in the past")
+		return 0, errors.New("target time is in the past")
 	}
 
 	if err := m.cancelExistingSession(); err != nil {
-		return 0, 0, err
+		return 0, err
 	}
 
 	cmd := exec.Command(m.caffeinateBinary, "-di", "-t", strconv.FormatInt(int64(duration.Seconds()), 10))
 	if err := cmd.Start(); err != nil {
-		return 0, 0, fmt.Errorf("failed to start %s: %w", m.caffeinateBinary, err)
+		return 0, fmt.Errorf("failed to start %s: %w", m.caffeinateBinary, err)
 	}
 
 	pid := cmd.Process.Pid
-	if err := m.saveState(pid, targetTime.Unix()); err != nil {
-		return 0, 0, fmt.Errorf("failed to persist pid: %w", err)
+	if err := m.saveState(pid, target.Unix()); err != nil {
+		return 0, fmt.Errorf("failed to persist pid: %w", err)
 	}
 
-	return pid, duration, nil
+	return pid, nil
 }
 
 // Cancel terminates the running caffeinate session (if any).

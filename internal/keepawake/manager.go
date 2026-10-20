@@ -132,6 +132,20 @@ func (m *Manager) StartUntil(t time.Time) (int, time.Duration, error) {
 	return pid, t.Sub(now), nil
 }
 
+// ResolveTarget parses target for today. A time that cannot run for at least
+// 1s today means the same wall-clock time tomorrow, with rolledOver set.
+func ResolveTarget(now time.Time, target string) (t time.Time, rolledOver bool, err error) {
+	t, err = parseTargetTime(now, target)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	if t.Sub(now) >= time.Second {
+		return t, false, nil
+	}
+	// time.Date, not Add(24h), keeps the wall-clock time across DST changes.
+	return time.Date(t.Year(), t.Month(), t.Day()+1, t.Hour(), t.Minute(), t.Second(), 0, now.Location()), true, nil
+}
+
 // start replaces any running session with a caffeinate process lasting from
 // now until target, and saves its state. It is the only place that runs caffeinate.
 func (m *Manager) start(now, target time.Time) (int, error) {

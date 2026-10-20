@@ -21,7 +21,7 @@ The duration must be between 1m and 24h.
 The command delegates to macOS caffeinate under the hood.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			d, err := parseDurationArg(strings.Join(args, ""))
+			d, err := durationFromArgs(args)
 			if err != nil {
 				return err
 			}
@@ -51,6 +51,11 @@ The command delegates to macOS caffeinate under the hood.`,
 	return cmd
 }
 
+// durationFromArgs joins args with no separator and parses the result as a duration.
+func durationFromArgs(args []string) (time.Duration, error) {
+	return parseDurationArg(strings.Join(args, ""))
+}
+
 // parseDurationArg parses a Go duration or a whole number of minutes within the allowed range.
 func parseDurationArg(arg string) (time.Duration, error) {
 	s := strings.ToLower(strings.TrimSpace(arg))
@@ -59,6 +64,10 @@ func parseDurationArg(arg string) (time.Duration, error) {
 		n, convErr := strconv.Atoi(s)
 		if convErr != nil {
 			return 0, fmt.Errorf("invalid duration %q: use a Go duration like 45m or 1h30m, or minutes like 90", arg)
+		}
+		// Check the range in minutes first so a huge n cannot overflow the multiplication.
+		if time.Duration(n) < keepawake.MinDuration/time.Minute || time.Duration(n) > keepawake.MaxDuration/time.Minute {
+			return 0, fmt.Errorf("duration %q out of range (%s to %s)", arg, keepawake.MinDuration, keepawake.MaxDuration)
 		}
 		d = time.Duration(n) * time.Minute
 	}

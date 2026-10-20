@@ -2,9 +2,11 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -65,6 +67,56 @@ func TestFormatStatus(t *testing.T) {
 	}
 }
 
+func TestStatusJSON(t *testing.T) {
+	tests := []struct {
+		name  string
+		state *keepawake.State
+		want  map[string]any
+	}{
+		{
+			name:  "active",
+			state: &keepawake.State{PID: 123, Until: time.Date(2026, time.March, 10, 22, 30, 0, 0, time.UTC)},
+			want: map[string]any{
+				"active":            true,
+				"pid":               float64(123),
+				"until":             "2026-03-10T17:30:00-05:00",
+				"remaining_seconds": float64(3900),
+			},
+		},
+		{
+			name:  "until already passed",
+			state: &keepawake.State{PID: 123, Until: time.Date(2026, time.March, 10, 15, 0, 0, 0, statusZone)},
+			want: map[string]any{
+				"active":            true,
+				"pid":               float64(123),
+				"until":             "2026-03-10T15:00:00-05:00",
+				"remaining_seconds": float64(0),
+			},
+		},
+		{
+			name:  "inactive",
+			state: nil,
+			want:  map[string]any{"active": false},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := statusJSON(tc.state, statusNow)
+			if err != nil {
+				t.Fatalf("statusJSON() error = %v", err)
+			}
+			var got map[string]any
+			if err := json.Unmarshal(out, &got); err != nil {
+				t.Fatalf("json.Unmarshal(%s): %v", out, err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("statusJSON() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // fakeStatusCommand builds the status command from fakes, counting launcher runs in *launches.
 func fakeStatusCommand(state *keepawake.State, stateErr, launchErr error, launches *int) *cobra.Command {
 	cmd := newStatusCommandWith(statusDeps{
@@ -85,6 +137,7 @@ func TestStatusCommand(t *testing.T) {
 
 	tests := []struct {
 		name         string
+		args         []string
 		state        *keepawake.State
 		stateErr     error
 		launchErr    error
@@ -116,6 +169,42 @@ func TestStatusCommand(t *testing.T) {
 			stateErr: readErr,
 			wantErr:  readErr,
 		},
+		{
+			name:      "json active",
+			args:      []string{"--json"},
+			state:     active,
+			launchErr: errors.New("boom"),
+			wantOut:   `{"active":true,"pid":123,"until":"2026-03-10T17:30:00-05:00","remaining_seconds":3900}` + "\n",
+		},
+		{
+			name:     "json inactive",
+			args:     []string{"--json"},
+			stateErr: keepawake.ErrStateNotFound,
+			wantOut:  `{"active":false}` + "\n",
+		},
+		{
+			name:     "json read error",
+			args:     []string{"--json"},
+			stateErr: readErr,
+			wantErr:  readErr,
+		},
+		{
+			name:  "quiet active",
+			args:  []string{"-q"},
+			state: active,
+		},
+		{
+			name:     "quiet inactive",
+			args:     []string{"--quiet"},
+			stateErr: keepawake.ErrStateNotFound,
+			wantErr:  ErrInactive,
+		},
+		{
+			name:     "quiet read error",
+			args:     []string{"--quiet"},
+			stateErr: readErr,
+			wantErr:  readErr,
+		},
 	}
 
 	for _, tc := range tests {
@@ -123,6 +212,9 @@ func TestStatusCommand(t *testing.T) {
 			var out, errOut bytes.Buffer
 			launches := 0
 			cmd := fakeStatusCommand(tc.state, tc.stateErr, tc.launchErr, &launches)
+			if tc.args != nil {
+				cmd.SetArgs(tc.args)
+			}
 			cmd.SetOut(&out)
 			cmd.SetErr(&errOut)
 
@@ -139,6 +231,26 @@ func TestStatusCommand(t *testing.T) {
 				t.Errorf("launcher ran %d times, want %d", launches, tc.wantLaunches)
 			}
 		})
+	}
+}
+
+func TestStatusCommandJSONAndQuietExclusive(t *testing.T) {
+	var out, errOut bytes.Buffer
+	launches := 0
+	active := &keepawake.State{PID: 123, Until: time.Date(2026, time.March, 10, 17, 30, 0, 0, statusZone)}
+	cmd := fakeStatusCommand(active, nil, nil, &launches)
+	cmd.SetArgs([]string{"--json", "--quiet"})
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+
+	if err := cmd.Execute(); err == nil {
+		t.Error("Execute() error = nil, want an error")
+	}
+	if got := out.String(); got != "" {
+		t.Errorf("stdout = %q, want empty", got)
+	}
+	if launches != 0 {
+		t.Errorf("launcher ran %d times, want 0", launches)
 	}
 }
 

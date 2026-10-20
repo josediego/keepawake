@@ -24,6 +24,7 @@ type App struct {
 	last            session
 	stoppedFromTray bool
 	notifier        Notifier // nil disables notifications
+	quit            func()   // closes the tray; tests replace it
 }
 
 // Option customizes an App.
@@ -43,6 +44,7 @@ func NewApp(manager *keepawake.Manager, opts ...Option) *App {
 		pollInterval: 5 * time.Second,
 		notifier:     osascriptNotifier{},
 	}
+	a.quit = a.quitTray
 	for _, opt := range opts {
 		opt(a)
 	}
@@ -92,18 +94,16 @@ func (a *App) onReady(ctx context.Context) {
 }
 
 func (a *App) watchState(ctx context.Context) {
-	ticker := time.NewTicker(a.pollInterval)
-	defer ticker.Stop()
-
 	// First immediate refresh
-	a.refresh()
+	timer := time.NewTimer(a.refresh())
+	defer timer.Stop()
 
 	for {
 		select {
-		case <-ticker.C:
-			a.refresh()
+		case <-timer.C:
+			timer.Reset(a.refresh())
 		case <-a.cancelItem.ClickedCh:
-			a.handleCancel()
+			timer.Reset(a.handleCancel())
 		case <-a.quitItem.ClickedCh:
 			systray.Quit()
 			return
@@ -113,15 +113,16 @@ func (a *App) watchState(ctx context.Context) {
 	}
 }
 
-func (a *App) refresh() {
+// refresh reads the state, updates the menu and returns the wait until the next refresh.
+func (a *App) refresh() time.Duration {
 	state, err := a.manager.CurrentState()
 	if err != nil && !errors.Is(err, keepawake.ErrStateNotFound) {
 		log.Printf("tray: could not read state: %v", err)
 	}
 
 	now := time.Now()
-	if msg, _ := a.observe(state, err, now); msg != "" {
-		a.notify(msg)
+	if a.react(state, err, now) {
+		return a.pollInterval
 	}
 
 	v := buildView(state, err, now)
@@ -136,6 +137,14 @@ func (a *App) refresh() {
 	}
 	setEnabled(a.cancelItem, v.CancelEnabled)
 	setEnabled(a.quitItem, v.QuitEnabled)
+	return nextRefresh(a.last, now, a.pollInterval)
+}
+
+// quitTray switches to the closed eye and quits systray.
+func (a *App) quitTray() {
+	systray.SetIcon(iconInactive)
+	systray.SetTemplateIcon(iconInactive, iconInactive)
+	systray.Quit()
 }
 
 // iconChange reports the icon to set when the active state differs from the last one.
@@ -150,16 +159,14 @@ func (a *App) iconChange(active bool) (icon []byte, changed bool) {
 	return iconInactive, true
 }
 
-// notify shows msg in the background, so osascript never blocks the menu loop.
+// notify shows msg and waits for it, so the notice is shown before the tray quits.
 func (a *App) notify(msg string) {
 	if a.notifier == nil {
 		return
 	}
-	go func() {
-		if err := a.notifier.Notify(notificationTitle, msg); err != nil {
-			log.Printf("tray: could not notify: %v", err)
-		}
-	}()
+	if err := a.notifier.Notify(notificationTitle, msg); err != nil {
+		log.Printf("tray: could not notify: %v", err)
+	}
 }
 
 func setEnabled(item *systray.MenuItem, enabled bool) {
@@ -173,7 +180,7 @@ func setEnabled(item *systray.MenuItem, enabled bool) {
 	item.Disable()
 }
 
-func (a *App) handleCancel() {
+func (a *App) handleCancel() time.Duration {
 	pid, err := a.stopFromTray()
 	switch {
 	case err == nil:
@@ -182,9 +189,8 @@ func (a *App) handleCancel() {
 		log.Printf("tray: cancel requested but no active session")
 	default:
 		log.Printf("tray: failed to cancel keepawake: %v", err)
-		return
 	}
 
-	// Force refresh to update UI immediately
-	a.refresh()
+	// Force refresh to update UI immediately; the end of the session quits the tray
+	return a.refresh()
 }

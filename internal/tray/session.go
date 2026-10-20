@@ -59,6 +59,38 @@ func (a *App) observe(state *keepawake.State, err error, now time.Time) (msg str
 	return m, ended
 }
 
+// react records a state reading and, once a session the tray saw has ended,
+// notifies first and then quits. Failed readings and a tray started with no
+// session never quit; the tray's own stop quits without a notification.
+func (a *App) react(state *keepawake.State, err error, now time.Time) (quit bool) {
+	msg, ended := a.observe(state, err, now)
+	if msg != "" {
+		a.notify(msg)
+	}
+	if !ended {
+		return false
+	}
+	a.quit()
+	return true
+}
+
+// nextRefresh returns the wait before the next state reading: one poll when
+// idle, otherwise until just after the end, capped at one poll. CurrentState
+// reports the end only once now is after Until in whole seconds, hence the 1s.
+func nextRefresh(cur session, now time.Time, poll time.Duration) time.Duration {
+	if !cur.Active {
+		return poll
+	}
+	wait := cur.Until.Add(time.Second).Sub(now)
+	switch {
+	case wait > poll:
+		return poll
+	case wait < 100*time.Millisecond:
+		return 100 * time.Millisecond
+	}
+	return wait
+}
+
 // stopFromTray cancels the session so that its end does not notify.
 func (a *App) stopFromTray() (int, error) {
 	a.stoppedFromTray = true

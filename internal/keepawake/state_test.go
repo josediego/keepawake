@@ -92,6 +92,43 @@ func TestCancelExistingSessionInvalidState(t *testing.T) {
 	}
 }
 
+func TestSaveStateAtomicPermissions(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state")
+	m, err := NewManager(WithStateFile(path), WithProcessController(&fakeController{}))
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	// The second write replaces an existing file.
+	for _, pid := range []int{1234, 5678} {
+		if err := m.saveState(pid, time.Now().Add(time.Hour).Unix()); err != nil {
+			t.Fatalf("saveState() error = %v", err)
+		}
+		leftovers, err := filepath.Glob(filepath.Join(dir, "*.tmp-*"))
+		if err != nil {
+			t.Fatalf("Glob() error = %v", err)
+		}
+		if len(leftovers) != 0 {
+			t.Fatalf("temp files left behind: %v", leftovers)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("Stat() error = %v", err)
+		}
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Fatalf("state file mode = %o, want 600", perm)
+		}
+		s, err := m.readState()
+		if err != nil {
+			t.Fatalf("readState() error = %v", err)
+		}
+		if s.PID != pid {
+			t.Fatalf("readState() PID = %d, want %d", s.PID, pid)
+		}
+	}
+}
+
 func TestNegativePIDNeverSignalsAProcessGroup(t *testing.T) {
 	cmd := exec.Command("sleep", "30")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

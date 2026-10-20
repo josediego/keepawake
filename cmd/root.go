@@ -20,6 +20,7 @@ func newRootCommand(version string) *cobra.Command {
 
 	root.AddCommand(
 		newUntilCommand(),
+		newForCommand(),
 		newCancelCommand(),
 		newTrayCommand(),
 		newStatusCommand(),

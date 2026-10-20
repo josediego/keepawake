@@ -7,6 +7,7 @@ A structured CLI wrapper around macOS `caffeinate` that keeps your machine awake
 ```bash
 go run . until 17:00
 go run . until "5:30pm"
+go run . for 45m
 go run . cancel
 go run . tray
 ```

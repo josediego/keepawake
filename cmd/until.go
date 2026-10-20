@@ -1,9 +1,7 @@
 package cmd
 
 import (
-	"fmt"
 	"strings"
-	"time"
 
 	"github.com/jose/keepawake/internal/keepawake"
 	"github.com/jose/keepawake/internal/tray"
@@ -41,22 +39,4 @@ The command delegates to macOS caffeinate under the hood.`,
 	}
 
 	return cmd
-}
-
-func humanDuration(d time.Duration) string {
-	if d < time.Minute {
-		return d.Round(time.Second).String()
-	}
-
-	hours := int(d.Hours())
-	minutes := int(d.Minutes()) % 60
-
-	switch {
-	case hours > 0 && minutes > 0:
-		return fmt.Sprintf("%dh %dm", hours, minutes)
-	case hours > 0:
-		return fmt.Sprintf("%dh", hours)
-	default:
-		return fmt.Sprintf("%dm", minutes)
-	}
 }

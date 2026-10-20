@@ -19,8 +19,6 @@ const trayPIDFileName = ".keepawake.tray.pid"
 
 // EnsureRunning starts the tray process in the background if it's not active yet.
 func EnsureRunning() error {
-	startedNewTray := false
-
 	pid, err := readTrayPID()
 	if err == nil {
 		if alive(pid) {
@@ -50,22 +48,15 @@ func EnsureRunning() error {
 		return fmt.Errorf("tray: start background process: %w", err)
 	}
 
-	startedNewTray = true
 	_ = cmd.Process.Release()
 
-	if startedNewTray {
-		if err := waitForTrayReady(3 * time.Second); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return waitForTrayReady(3 * time.Second)
 }
 
 var errPIDNotFound = errors.New("tray pid not found")
 
 func readTrayPID() (int, error) {
-	path, err := trayPIDFilePath()
+	path, err := trayPIDPath()
 	if err != nil {
 		return 0, err
 	}
@@ -77,6 +68,10 @@ func readTrayPID() (int, error) {
 		return 0, err
 	}
 	pidStr := strings.TrimSpace(string(data))
+	if pidStr == "" {
+		// The guard creates the file before writing its PID under the lock.
+		return 0, errPIDNotFound
+	}
 	pid, err := strconv.Atoi(pidStr)
 	if err != nil {
 		return 0, fmt.Errorf("tray: invalid pid %q: %w", pidStr, err)
@@ -84,16 +79,8 @@ func readTrayPID() (int, error) {
 	return pid, nil
 }
 
-func saveTrayPID(pid int) error {
-	path, err := trayPIDFilePath()
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, []byte(strconv.Itoa(pid)), 0o644)
-}
-
 func removeTrayPID() error {
-	path, err := trayPIDFilePath()
+	path, err := trayPIDPath()
 	if err != nil {
 		return err
 	}
@@ -103,7 +90,10 @@ func removeTrayPID() error {
 	return nil
 }
 
-func trayPIDFilePath() (string, error) {
+// trayPIDPath resolves the tray PID/lock file; tests override it.
+var trayPIDPath = defaultTrayPIDPath
+
+func defaultTrayPIDPath() (string, error) {
 	usr, err := user.Current()
 	if err != nil {
 		return "", err
@@ -115,40 +105,53 @@ func alive(pid int) bool {
 	return procutil.Alive(pid)
 }
 
-// ForegroundPIDGuard registers the caller as the active tray process and
-// returns a cleanup function to clear the PID file when finished. If a live
-// tray already exists, alreadyRunning=true and existingPID reports it.
+// ForegroundPIDGuard registers the caller as the active tray process by
+// holding an exclusive advisory lock on the PID file for the tray's lifetime,
+// and returns a cleanup function that removes the file and releases the lock.
+// If another live tray holds the lock, alreadyRunning=true and existingPID
+// reports it. The kernel releases the lock if the holder dies, so a stale
+// file is simply acquired again.
 func ForegroundPIDGuard(pid int) (cleanup func() error, existingPID int, alreadyRunning bool, err error) {
-	currentPID, alive, err := currentTrayPID()
+	path, err := trayPIDPath()
 	if err != nil {
 		return nil, 0, false, err
 	}
-	if alive {
-		return nil, currentPID, true, nil
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, 0, false, err
 	}
-	if err := saveTrayPID(pid); err != nil {
+	fd := int(f.Fd())
+	if err := syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			// Best effort: the holder may not have written its PID yet.
+			existingPID, _ = readTrayPID()
+			return nil, existingPID, true, nil
+		}
+		return nil, 0, false, fmt.Errorf("tray: lock pid file: %w", err)
+	}
+	if err := writeLockedPID(f, pid); err != nil {
+		_ = syscall.Flock(fd, syscall.LOCK_UN)
+		_ = f.Close()
 		return nil, 0, false, err
 	}
 	return func() error {
-		return removeTrayPID()
+		// Remove while still holding the lock so no contender locks the old inode.
+		removeErr := removeTrayPID()
+		_ = syscall.Flock(fd, syscall.LOCK_UN)
+		if err := f.Close(); err != nil {
+			return err
+		}
+		return removeErr
 	}, pid, false, nil
 }
 
-func currentTrayPID() (pid int, aliveNow bool, err error) {
-	pid, err = readTrayPID()
-	if err != nil {
-		if errors.Is(err, errPIDNotFound) {
-			return 0, false, nil
-		}
-		return 0, false, err
+func writeLockedPID(f *os.File, pid int) error {
+	if err := f.Truncate(0); err != nil {
+		return err
 	}
-	if alive(pid) {
-		return pid, true, nil
-	}
-	if err := removeTrayPID(); err != nil {
-		return 0, false, err
-	}
-	return 0, false, nil
+	_, err := f.WriteAt([]byte(strconv.Itoa(pid)), 0)
+	return err
 }
 
 // EnsureStopped terminates background tray process if running.

@@ -209,7 +209,38 @@ func (m *Manager) saveState(pid int, until int64) error {
 		return err
 	}
 
-	return os.WriteFile(m.stateFilePath, payload, 0o644)
+	// Write to a sibling temp file and rename it over the target so readers
+	// never observe a partially written state file.
+	dir, base := filepath.Dir(m.stateFilePath), filepath.Base(m.stateFilePath)
+	tmp, err := os.CreateTemp(dir, base+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if err := writeAndSync(tmp, payload); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, m.stateFilePath); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	return nil
+}
+
+func writeAndSync(f *os.File, payload []byte) error {
+	if err := f.Chmod(0o600); err != nil {
+		return err
+	}
+	if _, err := f.Write(payload); err != nil {
+		return err
+	}
+	return f.Sync()
 }
 
 func (m *Manager) readState() (*state, error) {

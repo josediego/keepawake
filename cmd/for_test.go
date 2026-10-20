@@ -24,6 +24,12 @@ func TestParseDurationArg(t *testing.T) {
 		{in: "59s", wantErr: true},
 		{in: "25h", wantErr: true},
 		{in: "abc", wantErr: true},
+		{in: "1440", want: 24 * time.Hour},
+		{in: "1", want: time.Minute},
+		{in: "9007199254741052", wantErr: true},
+		{in: "1441", wantErr: true},
+		{in: "-1", wantErr: true},
+		{in: "99999999999999999999999999", wantErr: true},
 	}
 
 	for _, tc := range tests {
@@ -56,6 +62,42 @@ func TestFormatUntil(t *testing.T) {
 	}
 	if got := formatUntil(now, time.Date(2026, time.October, 18, 4, 0, 0, 0, time.Local)); got != "Sun 18 Oct 04:00" {
 		t.Errorf("next day = %q, want %q", got, "Sun 18 Oct 04:00")
+	}
+
+	// 2026-10-17 22:00 in A is 2026-10-18 01:00 UTC: the same day as t in t's zone.
+	zoned := time.Date(2026, time.October, 17, 22, 0, 0, 0, time.FixedZone("A", -3*3600))
+	if got := formatUntil(zoned, time.Date(2026, time.October, 18, 3, 0, 0, 0, time.UTC)); got != "03:00" {
+		t.Errorf("same day in t's zone = %q, want %q", got, "03:00")
+	}
+}
+
+func TestDurationFromArgs(t *testing.T) {
+	tests := []struct {
+		args    []string
+		want    time.Duration
+		wantErr bool
+	}{
+		{args: []string{"1h", "30m"}, want: 90 * time.Minute},
+		{args: []string{"45m"}, want: 45 * time.Minute},
+		{args: []string{"1h", "x"}, wantErr: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			got, err := durationFromArgs(tc.args)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("durationFromArgs(%q) = %v, want error", tc.args, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("durationFromArgs(%q) error: %v", tc.args, err)
+			}
+			if got != tc.want {
+				t.Errorf("durationFromArgs(%q) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
 	}
 }
 

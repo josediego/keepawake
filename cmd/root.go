@@ -4,15 +4,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Execute runs the CLI root command.
-func Execute() error {
-	return newRootCommand().Execute()
+// Execute runs the CLI root command, reporting version for --version.
+func Execute(version string) error {
+	return newRootCommand(version).Execute()
 }
 
-func newRootCommand() *cobra.Command {
+func newRootCommand(version string) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "keepawake",
 		Short:         "Prevent your Mac from sleeping until a specific time",
+		Version:       version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}

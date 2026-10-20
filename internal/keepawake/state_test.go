@@ -2,9 +2,13 @@ package keepawake
 
 import (
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"syscall"
 	"testing"
+	"time"
 )
 
 var invalidStateCases = []struct {
@@ -16,6 +20,9 @@ var invalidStateCases = []struct {
 	{name: "null", contents: "null"},
 	{name: "zero pid", contents: `{"pid":0,"until":123}`},
 	{name: "zero until", contents: `{"pid":123,"until":0}`},
+	{name: "negative pid", contents: `{"pid":-1,"until":123}`},
+	{name: "negative process group pid", contents: `{"pid":-4242,"until":123}`},
+	{name: "negative until", contents: `{"pid":123,"until":-5}`},
 }
 
 func newManagerWithState(t *testing.T, contents string) (*Manager, string) {
@@ -83,4 +90,48 @@ func TestCancelExistingSessionInvalidState(t *testing.T) {
 			assertStateFileRemoved(t, path)
 		})
 	}
+}
+
+func TestNegativePIDNeverSignalsAProcessGroup(t *testing.T) {
+	cmd := exec.Command("sleep", "30")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start child process: %v", err)
+	}
+	done := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(done)
+	}()
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		<-done
+	})
+
+	contents := fmt.Sprintf(`{"pid":%d,"until":%d}`, -cmd.Process.Pid, time.Now().Add(time.Hour).Unix())
+	m, path := newManagerWithState(t, contents)
+
+	assertAlive := func(op string) {
+		t.Helper()
+		select {
+		case <-done:
+			t.Fatalf("child process group was signalled by %s", op)
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+
+	if _, err := m.Cancel(); !errors.Is(err, ErrStateNotFound) {
+		t.Fatalf("Cancel() error = %v, want ErrStateNotFound", err)
+	}
+	assertStateFileRemoved(t, path)
+	assertAlive("Cancel()")
+
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatalf("failed to write state file: %v", err)
+	}
+	if err := m.cancelExistingSession(); err != nil {
+		t.Fatalf("cancelExistingSession() error = %v, want nil", err)
+	}
+	assertStateFileRemoved(t, path)
+	assertAlive("cancelExistingSession()")
 }

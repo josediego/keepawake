@@ -270,37 +270,28 @@ func parseTargetTime(now time.Time, target string) (time.Time, error) {
 	layoutCandidates := []string{
 		"15:04",
 		"15:04:05",
-		time.Kitchen, // 3:04PM
 		"3:04pm",
 		"3pm",
 	}
 
-	var (
-		parsed  time.Time
-		lastErr error
-	)
-
+	value := normalizeTime(target)
 	for _, layout := range layoutCandidates {
-		value := target
-		if strings.Contains(layout, "pm") || layout == "3pm" {
-			value = strings.ToLower(target)
-		}
-		if layout == time.Kitchen {
-			value = strings.ToUpper(target)
-		}
-
 		t, err := time.ParseInLocation(layout, value, now.Location())
 		if err == nil {
-			parsed = time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), t.Second(), 0, now.Location())
-			lastErr = nil
-			break
+			return time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), t.Second(), 0, now.Location()), nil
 		}
-		lastErr = err
 	}
 
-	if lastErr != nil {
-		return time.Time{}, fmt.Errorf("unable to parse time %q: %w", target, lastErr)
-	}
+	return time.Time{}, fmt.Errorf("unable to parse time %q (try 17:30, 5pm or 5:30 pm)", target)
+}
 
-	return parsed, nil
+// normalizeTime lowercases s, collapses whitespace, maps a.m./p.m. to am/pm
+// and drops the space before the suffix, so "5:30  P.M." becomes "5:30pm".
+func normalizeTime(s string) string {
+	s = strings.Join(strings.Fields(strings.ToLower(s)), " ")
+	s = strings.ReplaceAll(s, "a.m.", "am")
+	s = strings.ReplaceAll(s, "p.m.", "pm")
+	s = strings.ReplaceAll(s, " am", "am")
+	s = strings.ReplaceAll(s, " pm", "pm")
+	return s
 }

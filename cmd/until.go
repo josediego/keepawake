@@ -14,7 +14,7 @@ func newUntilCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "until <time>",
 		Short: "Keep your Mac awake until the provided time",
-		Long: `Use 24-hour or 12-hour formats (e.g., "17:30", "5pm", "5:30pm").
+		Long: `Use 24-hour or 12-hour formats (e.g., "17:30", "5pm", "5:30 pm").
 The command delegates to macOS caffeinate under the hood.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

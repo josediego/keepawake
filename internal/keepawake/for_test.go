@@ -112,11 +112,12 @@ func assertKeepsSession(t *testing.T, call func(m *Manager, now time.Time) error
 	stateFile := filepath.Join(t.TempDir(), "state")
 	now := time.Date(2026, 1, 15, 10, 0, 0, 0, time.Local)
 
+	pc := &fakeController{caffeinate: true}
 	m, err := NewManager(
 		WithStateFile(stateFile),
 		WithClock(func() time.Time { return now }),
 		WithCaffeinateBinary("/nonexistent/caffeinate"),
-		WithProcessController(&fakeController{}),
+		WithProcessController(pc),
 	)
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
@@ -139,6 +140,7 @@ func assertKeepsSession(t *testing.T, call func(m *Manager, now time.Time) error
 		t.Errorf("existing session process was terminated")
 	case <-time.After(100 * time.Millisecond):
 	}
+	assertTerminated(t, pc, nil)
 
 	after, err := os.ReadFile(stateFile)
 	if err != nil {

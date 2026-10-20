@@ -71,18 +71,19 @@ func NewManager(opts ...Option) (*Manager, error) {
 // Until starts caffeinate until the requested target time.
 // It returns the pid that was started and the duration until that time.
 func (m *Manager) Until(target string) (int, time.Duration, error) {
-	targetTime, err := parseTargetTime(m.now(), target)
+	now := m.now()
+	targetTime, err := parseTargetTime(now, target)
 	if err != nil {
 		return 0, 0, err
 	}
 
-	if err := m.cancelExistingSession(); err != nil {
-		return 0, 0, err
+	duration := targetTime.Sub(now)
+	if duration < time.Second {
+		return 0, 0, errors.New("target time is in the past")
 	}
 
-	duration := targetTime.Sub(m.now())
-	if duration <= 0 {
-		return 0, 0, errors.New("target time is in the past")
+	if err := m.cancelExistingSession(); err != nil {
+		return 0, 0, err
 	}
 
 	cmd := exec.Command(m.caffeinateBinary, "-di", "-t", strconv.FormatInt(int64(duration.Seconds()), 10))

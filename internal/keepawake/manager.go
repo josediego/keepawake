@@ -30,7 +30,7 @@ var ErrStateNotFound = errors.New("no keepawake active (state file not found)")
 // ErrInvalidState is returned when the state file exists but is corrupt or incomplete.
 var ErrInvalidState = errors.New("invalid keepawake state file")
 
-// MinDuration and MaxDuration bound the durations accepted by For.
+// MinDuration and MaxDuration bound the durations accepted by For and Extend.
 const (
 	MinDuration = time.Minute
 	MaxDuration = 24 * time.Hour
@@ -132,6 +132,34 @@ func (m *Manager) StartUntil(t time.Time) (int, time.Duration, error) {
 	return pid, t.Sub(now), nil
 }
 
+// Extend pushes the end of the running session d further, or starts one for d
+// if none is running. The new end may be at most MaxDuration from now.
+// It returns the pid that was started and the time the session ends.
+func (m *Manager) Extend(d time.Duration) (int, time.Time, error) {
+	if d < MinDuration || d > MaxDuration {
+		return 0, time.Time{}, fmt.Errorf("duration %s out of range (%s to %s)", d, MinDuration, MaxDuration)
+	}
+
+	now := m.now()
+	until := now.Add(d)
+	s, err := m.CurrentState()
+	if err == nil && s.Until.After(now) {
+		until = s.Until.Add(d)
+	} else if err != nil && !errors.Is(err, ErrStateNotFound) {
+		return 0, time.Time{}, err
+	}
+	if until.Sub(now) > MaxDuration {
+		return 0, time.Time{}, fmt.Errorf("extended end %s is more than %s from now", until.Format(time.RFC3339), MaxDuration)
+	}
+
+	pid, err := m.start(now, until)
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+
+	return pid, until, nil
+}
+
 // ResolveTarget parses target for today. A time that cannot run for at least
 // 1s today means the same wall-clock time tomorrow, with rolledOver set.
 func ResolveTarget(now time.Time, target string) (t time.Time, rolledOver bool, err error) {
@@ -162,6 +190,9 @@ func (m *Manager) start(now, target time.Time) (int, error) {
 	if err := cmd.Start(); err != nil {
 		return 0, fmt.Errorf("failed to start %s: %w", m.caffeinateBinary, err)
 	}
+	// Reap caffeinate when it exits so a long-lived parent does not keep
+	// zombies; Process.Release does not reap.
+	go func() { _ = cmd.Wait() }()
 
 	pid := cmd.Process.Pid
 	if err := m.saveState(pid, target.Unix()); err != nil {

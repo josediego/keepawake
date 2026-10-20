@@ -27,6 +27,9 @@ type Option func(*Manager)
 // ErrStateNotFound is returned when the state file doesn't exist yet.
 var ErrStateNotFound = errors.New("no keepawake active (state file not found)")
 
+// ErrInvalidState is returned when the state file exists but is corrupt or incomplete.
+var ErrInvalidState = errors.New("invalid keepawake state file")
+
 // WithStateFile overrides the default state file path.
 func WithStateFile(path string) Option {
 	return func(m *Manager) {
@@ -103,6 +106,12 @@ func (m *Manager) Until(target string) (int, time.Duration, error) {
 func (m *Manager) Cancel() (int, error) {
 	state, err := m.readState()
 	if err != nil {
+		if errors.Is(err, ErrInvalidState) {
+			if rmErr := m.removeStateFile(); rmErr != nil {
+				return 0, rmErr
+			}
+			return 0, ErrStateNotFound
+		}
 		return 0, err
 	}
 
@@ -156,11 +165,11 @@ func (m *Manager) readState() (*state, error) {
 
 	var s state
 	if err := json.Unmarshal(data, &s); err != nil {
-		return nil, fmt.Errorf("invalid state in %s: %w", m.stateFilePath, err)
+		return nil, fmt.Errorf("%w: %s: %v", ErrInvalidState, m.stateFilePath, err)
 	}
 
 	if s.PID == 0 || s.Until == 0 {
-		return nil, fmt.Errorf("invalid state content in %s", m.stateFilePath)
+		return nil, fmt.Errorf("%w: missing pid or until in %s", ErrInvalidState, m.stateFilePath)
 	}
 
 	return &s, nil
@@ -171,6 +180,12 @@ func (m *Manager) readState() (*state, error) {
 func (m *Manager) CurrentState() (*State, error) {
 	s, err := m.readState()
 	if err != nil {
+		if errors.Is(err, ErrInvalidState) {
+			if rmErr := m.removeStateFile(); rmErr != nil {
+				return nil, rmErr
+			}
+			return nil, ErrStateNotFound
+		}
 		return nil, err
 	}
 
@@ -220,6 +235,10 @@ func (m *Manager) cancelExistingSession() error {
 	if err != nil {
 		if errors.Is(err, ErrStateNotFound) {
 			return nil
+		}
+		// Never kill a PID read from a corrupt file; just discard it.
+		if errors.Is(err, ErrInvalidState) {
+			return m.removeStateFile()
 		}
 		return err
 	}

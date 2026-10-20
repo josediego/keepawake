@@ -1,17 +1,17 @@
 package cmd
 
 import (
-	"github.com/jose/keepawake/internal/keepawake"
-	"github.com/jose/keepawake/internal/tray"
+	"fmt"
+
 	"github.com/spf13/cobra"
 )
 
-func newCancelCommand() *cobra.Command {
+func newCancelCommand(deps sessionDeps) *cobra.Command {
 	return &cobra.Command{
 		Use:   "cancel",
 		Short: "Stop the active keepawake session",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			manager, err := keepawake.NewManager()
+			manager, err := deps.manager()
 			if err != nil {
 				return err
 			}
@@ -21,10 +21,10 @@ func newCancelCommand() *cobra.Command {
 				return err
 			}
 
-			cmd.Printf("Keepawake cancelled (PID %d)\n", pid)
+			fmt.Fprintf(cmd.OutOrStdout(), "Keepawake cancelled (PID %d)\n", pid)
 
-			if err := tray.EnsureRunning(); err != nil {
-				cmd.Printf("Warning: could not launch tray: %v\n", err)
+			if err := deps.launchTray(); err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not launch tray: %v\n", err)
 			}
 			return nil
 		},

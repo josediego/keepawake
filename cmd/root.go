@@ -19,10 +19,10 @@ func newRootCommand(version string) *cobra.Command {
 	}
 
 	root.AddCommand(
-		newUntilCommand(),
-		newForCommand(),
-		newCancelCommand(),
-		newTrayCommand(),
+		newUntilCommand(defaultSessionDeps()),
+		newForCommand(defaultSessionDeps()),
+		newCancelCommand(defaultSessionDeps()),
+		newTrayCommand(defaultTrayDeps()),
 		newStatusCommand(),
 	)
 

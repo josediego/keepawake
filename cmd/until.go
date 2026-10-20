@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/jose/keepawake/internal/keepawake"
-	"github.com/jose/keepawake/internal/tray"
 	"github.com/spf13/cobra"
 )
 
@@ -28,7 +27,7 @@ type untilDeps struct {
 	isTerminal func() bool
 }
 
-func newUntilCommand() *cobra.Command {
+func newUntilCommand(deps sessionDeps) *cobra.Command {
 	var yes bool
 
 	cmd := &cobra.Command{
@@ -39,24 +38,24 @@ A time that already passed today means tomorrow, after confirmation (or --yes).
 The command delegates to macOS caffeinate under the hood.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			manager, err := keepawake.NewManager()
+			manager, err := deps.manager()
 			if err != nil {
 				return err
 			}
 
-			deps := untilDeps{
+			ud := untilDeps{
 				now:        time.Now,
 				starter:    manager,
 				in:         cmd.InOrStdin(),
 				out:        cmd.OutOrStdout(),
 				isTerminal: func() bool { return isTerminal(os.Stdin) },
 			}
-			if err := runUntil(deps, strings.Join(args, " "), yes); err != nil {
+			if err := runUntil(ud, strings.Join(args, " "), yes); err != nil {
 				return err
 			}
 
-			if err := tray.EnsureRunning(); err != nil {
-				cmd.Printf("Warning: could not launch tray: %v\n", err)
+			if err := deps.launchTray(); err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not launch tray: %v\n", err)
 			}
 			return nil
 		},

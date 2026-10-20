@@ -106,3 +106,62 @@ func TestForegroundPIDGuardStalePIDFile(t *testing.T) {
 		t.Fatalf("expected pid file to be removed, stat err = %v", err)
 	}
 }
+
+func TestForegroundPIDGuardReportsHolder(t *testing.T) {
+	path := withTempTrayPIDPath(t)
+
+	cleanup, _, alreadyRunning, err := ForegroundPIDGuard(4242)
+	if err != nil {
+		t.Fatalf("ForegroundPIDGuard(4242) error = %v", err)
+	}
+	if alreadyRunning || cleanup == nil {
+		t.Fatalf("ForegroundPIDGuard(4242) alreadyRunning = %v, cleanup nil = %v; want acquired", alreadyRunning, cleanup == nil)
+	}
+	defer cleanup()
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("pid file mode = %o, want 600", perm)
+	}
+
+	second, existingPID, alreadyRunning, err := ForegroundPIDGuard(4343)
+	if err != nil {
+		t.Fatalf("ForegroundPIDGuard(4343) error = %v", err)
+	}
+	if !alreadyRunning || second != nil {
+		t.Fatalf("ForegroundPIDGuard(4343) alreadyRunning = %v, cleanup nil = %v; want already running", alreadyRunning, second == nil)
+	}
+	if existingPID != 4242 {
+		t.Fatalf("existingPID = %d, want 4242", existingPID)
+	}
+}
+
+func TestForegroundPIDGuardUnlockedLivePIDIsStale(t *testing.T) {
+	path := withTempTrayPIDPath(t)
+
+	// A live PID that nobody holds the lock for.
+	if err := os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+		t.Fatalf("failed to write pid file: %v", err)
+	}
+
+	cleanup, _, alreadyRunning, err := ForegroundPIDGuard(4242)
+	if err != nil {
+		t.Fatalf("ForegroundPIDGuard() error = %v", err)
+	}
+	if alreadyRunning || cleanup == nil {
+		t.Fatalf("ForegroundPIDGuard() alreadyRunning = %v, cleanup nil = %v; want acquired", alreadyRunning, cleanup == nil)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read pid file: %v", err)
+	}
+	if got := string(data); got != "4242" {
+		t.Fatalf("pid file contents = %q, want %q", got, "4242")
+	}
+	if err := cleanup(); err != nil {
+		t.Fatalf("cleanup() error = %v", err)
+	}
+}

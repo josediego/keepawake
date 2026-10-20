@@ -23,6 +23,9 @@ var invalidStateCases = []struct {
 	{name: "negative pid", contents: `{"pid":-1,"until":123}`},
 	{name: "negative process group pid", contents: `{"pid":-4242,"until":123}`},
 	{name: "negative until", contents: `{"pid":123,"until":-5}`},
+	{name: "unknown mode", contents: `{"pid":123,"until":123,"mode":"x"}`},
+	{name: "repeated mode", contents: `{"pid":123,"until":123,"mode":"dd"}`},
+	{name: "out-of-order mode", contents: `{"pid":123,"until":123,"mode":"id"}`},
 }
 
 func newManagerWithState(t *testing.T, contents string) (*Manager, string) {

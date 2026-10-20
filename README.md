@@ -17,5 +17,26 @@ go run . tray
 - `internal/keepawake` – core orchestration of `caffeinate`, state management, and time parsing
 - `main.go` – thin entrypoint that wires the CLI together
 - `internal/tray` – menubar icon logic plus the background launcher used by `keepawake until`
+- `assets/` – tray icon PNGs (`icons/`), embedded into the binary by the `assets` Go package
 
-Install the binary with `go install ./...` or build locally with `go build ./...`. Runtime metadata lives in `~/.keepawake.state`, which stores the active PID and the scheduled wake timestamp.
+## Build
+
+```bash
+make build      # builds bin/keepawake
+make test       # go test ./...
+make vet        # go vet ./...
+make fmt-check  # fails listing any files gofmt would change
+make check      # build, vet, fmt-check and test
+make install    # go install with the version embedded
+make clean      # removes bin/
+```
+
+The version comes from `git describe --tags --always --dirty`:
+
+```bash
+keepawake --version   # or -v; prints "keepawake version <version>"
+```
+
+A plain `go build` or `go install` reports `dev`.
+
+Runtime metadata lives in `~/.keepawake.state`, which stores the active PID and the scheduled wake timestamp.

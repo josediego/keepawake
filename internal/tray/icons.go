@@ -1,19 +1,10 @@
 package tray
 
 import (
-	"encoding/base64"
-	"log"
+	"github.com/jose/keepawake/assets"
 )
 
 var (
-	iconActive   = mustDecodePNG("iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAABwElEQVR4AezSPU4lMRAEYLPJ7n1WGy/kwB0IOQVwCkLuAORAjLgPJEB91rRl3uNfIkBi5LLL3V1dtjW/2hd/PwZvPvB7nmgzXS4WPGQF+8NwyPLyeM2AuJoxgeqEH2QDatRmuz6eMyAmIqa4zLS1YCMr2B+FQ5amlobWfmDVQIHrK5gb4yAOuFMDExCn1QPvmA0UK5AgcEqN7P9mOg3uF+Bi2TY6oGn59Bgms8H/JA2FBDhodB2yE3gewMXkEu6DhtbGk1lbGUiWK96Ty6RY05Ps/yzAxeQSGoPWrfXCh0EV1gmGImQ7MPYz3S3AQ1vl8EL16C9SN6gk9+KfXZ1+aMugXOsmoyDkPDCOM/1egIe2yuGF6nElUAbey+m543IF5v7xvQRuF+BicgmNUVq9Oi8DFVXsBD0pGNwE/4KzQFPAxeQS7oOG1qafHpkNuPr3xRUSgL1GuyHqARdLqLm1f5+m5dOjdOMvSryPVRMixaBRL8qEg8aAJ9w01wPvcJpOpkmBf3x+MkYaeR7AoRqrpaGdWrW1G8xJp95IgBhmMQ5OrEZtStfHczdYrSKGaqYhDkxW65/s32PwRPDRzfc3eAQAAP//FGZYkwAAAAZJREFUAwBS6GYxEu7hRAAAAABJRU5ErkJggg==")
-	iconInactive = mustDecodePNG("iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAABVklEQVR4AeyRsS4FQRSGh07nHSTeQpCQ6DyEQqJUSUSQeAGFKKi8BYlQaDwDhUa0Eo2O7xtz1t5l710X3d6cf/5/zs75z8y5k+mff32DkQPuR9R5RHucFNCfhF4ixX8wj+0uWAC/DY31ElWD/eKak0WPS+GRPeMF17gJX+AN2I4VUat51tFAN5OyNzhQ/BDWWGuZl5WrEbkxuagA2+AC5FvAw8JX33PAGijpoZd6oIGJJ5ZnYCyzeCObnKI1gnKoN1BXBTOwYa0e6oz6iEwcskyDY1Af2Rp7zd5goT5C2whKnj1DWKsH8iOaDcyes2wCbz4BXwLjwaXgsfAJ7BnPrqOthT6j2WCFT+IVjnC+6h0WzcQW2phyKbDGWlFS6ct/UH2oidWibwtLoZfcDEPzBd+d9QU3fLgDEWrxEok27tJgjmIBDcQsOwG1R5cG7dUdvvQNRg7pHQAA//9cpSDJAAAABklEQVQDABLTNzECZN8dAAAAAElFTkSuQmCC")
+	iconActive   = assets.EyePNG
+	iconInactive = assets.EyeClosedPNG
 )
-
-func mustDecodePNG(b64 string) []byte {
-	data, err := base64.StdEncoding.DecodeString(b64)
-	if err != nil {
-		log.Fatalf("internal/tray: invalid base64 png: %v", err)
-	}
-	return data
-}

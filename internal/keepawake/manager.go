@@ -168,8 +168,8 @@ func (m *Manager) readState() (*state, error) {
 		return nil, fmt.Errorf("%w: %s: %v", ErrInvalidState, m.stateFilePath, err)
 	}
 
-	if s.PID == 0 || s.Until == 0 {
-		return nil, fmt.Errorf("%w: missing pid or until in %s", ErrInvalidState, m.stateFilePath)
+	if s.PID <= 0 || s.Until <= 0 {
+		return nil, fmt.Errorf("%w: missing or non-positive pid or until in %s", ErrInvalidState, m.stateFilePath)
 	}
 
 	return &s, nil

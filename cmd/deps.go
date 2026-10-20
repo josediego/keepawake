@@ -21,6 +21,7 @@ var _ sessionManager = (*keepawake.Manager)(nil)
 type sessionDeps struct {
 	manager    func() (sessionManager, error)
 	launchTray func() error
+	stopTray   func() error
 }
 
 // defaultSessionDeps builds the manager only when a command runs, so building the commands reads no state.
@@ -30,6 +31,7 @@ func defaultSessionDeps() sessionDeps {
 			return keepawake.NewManager()
 		},
 		launchTray: tray.EnsureRunning,
+		stopTray:   tray.EnsureStopped,
 	}
 }
 

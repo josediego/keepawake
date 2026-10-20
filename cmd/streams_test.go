@@ -20,12 +20,16 @@ func (fakeSession) StartUntil(time.Time) (int, time.Duration, error) { return 43
 func (fakeSession) For(d time.Duration) (int, time.Time, error)      { return 42, time.Now().Add(d), nil }
 func (fakeSession) Cancel() (int, error)                             { return 44, nil }
 
-// fakeSessionDeps builds sessionDeps from fakes, counting launcher runs in *launches.
-func fakeSessionDeps(launches *int) sessionDeps {
+// fakeSessionDeps builds sessionDeps from fakes, counting launcher runs in *launches and stopper runs in *stops.
+func fakeSessionDeps(launches, stops *int) sessionDeps {
 	return sessionDeps{
 		manager: func() (sessionManager, error) { return fakeSession{}, nil },
 		launchTray: func() error {
 			*launches++
+			return errors.New("boom")
+		},
+		stopTray: func() error {
+			*stops++
 			return errors.New("boom")
 		},
 	}
@@ -77,35 +81,44 @@ func runOnRealStreams(t *testing.T, c *cobra.Command, args ...string) (stdout, s
 
 func TestSessionCommandsWriteToRealStreams(t *testing.T) {
 	tests := []struct {
-		name    string
-		newCmd  func(sessionDeps) *cobra.Command
-		args    []string
-		wantOut *regexp.Regexp
+		name         string
+		newCmd       func(sessionDeps) *cobra.Command
+		args         []string
+		wantOut      *regexp.Regexp
+		wantErr      string
+		wantLaunches int
+		wantStops    int
 	}{
 		{
-			name:    "for",
-			newCmd:  newForCommand,
-			args:    []string{"45m"},
-			wantOut: regexp.MustCompile(`^Keepawake active \(PID 42\) for 45m \(until [^)]+\)\n$`),
+			name:         "for",
+			newCmd:       newForCommand,
+			args:         []string{"45m"},
+			wantOut:      regexp.MustCompile(`^Keepawake active \(PID 42\) for 45m \(until [^)]+\)\n$`),
+			wantErr:      "Warning: could not launch tray: boom\n",
+			wantLaunches: 1,
 		},
 		{
-			name:    "until",
-			newCmd:  newUntilCommand,
-			args:    []string{"17:00", "--yes"},
-			wantOut: regexp.MustCompile(`^Keepawake active \(PID 43\) for 2h \(until (\w{3} \d{1,2} \w{3} )?17:00\)\n$`),
+			name:         "until",
+			newCmd:       newUntilCommand,
+			args:         []string{"17:00", "--yes"},
+			wantOut:      regexp.MustCompile(`^Keepawake active \(PID 43\) for 2h \(until (\w{3} \d{1,2} \w{3} )?17:00\)\n$`),
+			wantErr:      "Warning: could not launch tray: boom\n",
+			wantLaunches: 1,
 		},
 		{
-			name:    "cancel",
-			newCmd:  newCancelCommand,
-			wantOut: regexp.MustCompile(`^Keepawake cancelled \(PID 44\)\n$`),
+			name:      "cancel",
+			newCmd:    newCancelCommand,
+			wantOut:   regexp.MustCompile(`^Keepawake cancelled \(PID 44\)\n$`),
+			wantErr:   "Warning: could not close tray: boom\n",
+			wantStops: 1,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv(noTrayEnv, "")
-			launches := 0
-			gotOut, gotErr, err := runOnRealStreams(t, tt.newCmd(fakeSessionDeps(&launches)), tt.args...)
+			launches, stops := 0, 0
+			gotOut, gotErr, err := runOnRealStreams(t, tt.newCmd(fakeSessionDeps(&launches, &stops)), tt.args...)
 
 			if err != nil {
 				t.Fatalf("Execute() error = %v", err)
@@ -113,11 +126,14 @@ func TestSessionCommandsWriteToRealStreams(t *testing.T) {
 			if !tt.wantOut.MatchString(gotOut) {
 				t.Errorf("stdout = %q, want match for %s", gotOut, tt.wantOut)
 			}
-			if want := "Warning: could not launch tray: boom\n"; gotErr != want {
-				t.Errorf("stderr = %q, want %q", gotErr, want)
+			if gotErr != tt.wantErr {
+				t.Errorf("stderr = %q, want %q", gotErr, tt.wantErr)
 			}
-			if launches != 1 {
-				t.Errorf("launcher ran %d times, want 1", launches)
+			if launches != tt.wantLaunches {
+				t.Errorf("launcher ran %d times, want %d", launches, tt.wantLaunches)
+			}
+			if stops != tt.wantStops {
+				t.Errorf("stopper ran %d times, want %d", stops, tt.wantStops)
 			}
 		})
 	}

@@ -4,8 +4,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync"
+	"syscall"
 	"testing"
 )
 
@@ -163,5 +165,127 @@ func TestForegroundPIDGuardUnlockedLivePIDIsStale(t *testing.T) {
 	}
 	if err := cleanup(); err != nil {
 		t.Fatalf("cleanup() error = %v", err)
+	}
+}
+
+// fakeSignalTray replaces signalTray with a recorder of SIGTERM'd PIDs, so no test signals a real process.
+func fakeSignalTray(t *testing.T) *[]int {
+	t.Helper()
+	var signalled []int
+	orig := signalTray
+	signalTray = func(pid int, sig syscall.Signal) error {
+		if sig != syscall.SIGTERM {
+			t.Errorf("signalTray(%d, %v), want SIGTERM", pid, sig)
+		}
+		signalled = append(signalled, pid)
+		return nil
+	}
+	t.Cleanup(func() { signalTray = orig })
+	return &signalled
+}
+
+// holdTrayLock writes content to path and holds its lock until the test ends, as a live tray would.
+func holdTrayLock(t *testing.T, path, content string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		t.Fatalf("Flock() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		f.Close()
+	})
+	if _, err := f.WriteString(content); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEnsureStoppedSignalsLockHolder(t *testing.T) {
+	path := withTempTrayPIDPath(t)
+	signalled := fakeSignalTray(t)
+
+	cleanup, _, alreadyRunning, err := ForegroundPIDGuard(4242)
+	if err != nil || alreadyRunning {
+		t.Fatalf("ForegroundPIDGuard() alreadyRunning = %v, error = %v", alreadyRunning, err)
+	}
+
+	if err := EnsureStopped(); err != nil {
+		t.Fatalf("EnsureStopped() error = %v", err)
+	}
+	if want := []int{4242}; !slices.Equal(*signalled, want) {
+		t.Fatalf("signalled = %v, want %v", *signalled, want)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected pid file to be removed, stat err = %v", err)
+	}
+	if err := cleanup(); err != nil {
+		t.Fatalf("cleanup() error = %v", err)
+	}
+}
+
+func TestEnsureStoppedUnlockedLivePIDIsStale(t *testing.T) {
+	path := withTempTrayPIDPath(t)
+	signalled := fakeSignalTray(t)
+
+	if err := os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+		t.Fatalf("failed to write pid file: %v", err)
+	}
+
+	if err := EnsureStopped(); err != nil {
+		t.Fatalf("EnsureStopped() error = %v", err)
+	}
+	if len(*signalled) != 0 {
+		t.Fatalf("signalled = %v, want none", *signalled)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected pid file to be removed, stat err = %v", err)
+	}
+}
+
+func TestEnsureStoppedInvalidPIDNotSignalled(t *testing.T) {
+	for _, content := range []string{"-1", "0"} {
+		t.Run(content, func(t *testing.T) {
+			path := withTempTrayPIDPath(t)
+			signalled := fakeSignalTray(t)
+			holdTrayLock(t, path, content)
+
+			if err := EnsureStopped(); err == nil {
+				t.Errorf("EnsureStopped() error = nil, want an error for pid %s", content)
+			}
+			if len(*signalled) != 0 {
+				t.Fatalf("signalled = %v, want none", *signalled)
+			}
+		})
+	}
+}
+
+func TestEnsureStoppedNoFile(t *testing.T) {
+	withTempTrayPIDPath(t)
+	signalled := fakeSignalTray(t)
+
+	for i := 0; i < 2; i++ {
+		if err := EnsureStopped(); err != nil {
+			t.Fatalf("EnsureStopped() call %d error = %v", i+1, err)
+		}
+	}
+	if len(*signalled) != 0 {
+		t.Fatalf("signalled = %v, want none", *signalled)
+	}
+}
+
+func TestEnsureStoppedHolderWithoutPID(t *testing.T) {
+	path := withTempTrayPIDPath(t)
+	signalled := fakeSignalTray(t)
+	holdTrayLock(t, path, "")
+
+	if err := EnsureStopped(); err != nil {
+		t.Fatalf("EnsureStopped() error = %v", err)
+	}
+	if len(*signalled) != 0 {
+		t.Fatalf("signalled = %v, want none", *signalled)
 	}
 }

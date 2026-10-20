@@ -31,7 +31,7 @@ func newManagerWithState(t *testing.T, contents string) (*Manager, string) {
 	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
 		t.Fatalf("failed to write state file: %v", err)
 	}
-	m, err := NewManager(WithStateFile(path))
+	m, err := NewManager(WithStateFile(path), WithProcessController(&fakeController{}))
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}

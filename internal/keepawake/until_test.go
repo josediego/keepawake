@@ -37,6 +37,7 @@ func assertUntilKeepsSession(t *testing.T, input string) {
 		WithStateFile(stateFile),
 		WithClock(func() time.Time { return now }),
 		WithCaffeinateBinary("/nonexistent/caffeinate"),
+		WithProcessController(&fakeController{}),
 	)
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)

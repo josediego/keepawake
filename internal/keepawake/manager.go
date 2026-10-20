@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -19,6 +18,7 @@ type Manager struct {
 	caffeinateBinary string
 	now              func() time.Time
 	processes        ProcessController
+	mode             Mode
 }
 
 // Option configures a Manager.
@@ -64,6 +64,14 @@ func WithProcessController(pc ProcessController) Option {
 	}
 }
 
+// WithMode sets the mode of the sessions this Manager starts.
+// The zero Mode means DefaultMode.
+func WithMode(mode Mode) Option {
+	return func(m *Manager) {
+		m.mode = mode
+	}
+}
+
 // NewManager builds a Manager with sane defaults.
 func NewManager(opts ...Option) (*Manager, error) {
 	defaultStateFile, err := defaultStateFilePath()
@@ -94,7 +102,7 @@ func (m *Manager) Until(target string) (int, time.Duration, error) {
 		return 0, 0, err
 	}
 
-	pid, err := m.start(now, targetTime)
+	pid, err := m.start(now, targetTime, m.mode)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -111,7 +119,7 @@ func (m *Manager) For(d time.Duration) (int, time.Time, error) {
 
 	now := m.now()
 	until := now.Add(d)
-	pid, err := m.start(now, until)
+	pid, err := m.start(now, until, m.mode)
 	if err != nil {
 		return 0, time.Time{}, err
 	}
@@ -124,7 +132,7 @@ func (m *Manager) For(d time.Duration) (int, time.Time, error) {
 // It returns the pid that was started and the duration until t.
 func (m *Manager) StartUntil(t time.Time) (int, time.Duration, error) {
 	now := m.now()
-	pid, err := m.start(now, t)
+	pid, err := m.start(now, t, m.mode)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -142,9 +150,11 @@ func (m *Manager) Extend(d time.Duration) (int, time.Time, error) {
 
 	now := m.now()
 	until := now.Add(d)
+	mode := m.mode
 	s, err := m.CurrentState()
 	if err == nil && s.Until.After(now) {
 		until = s.Until.Add(d)
+		mode = s.Mode
 	} else if err != nil && !errors.Is(err, ErrStateNotFound) {
 		return 0, time.Time{}, err
 	}
@@ -152,7 +162,7 @@ func (m *Manager) Extend(d time.Duration) (int, time.Time, error) {
 		return 0, time.Time{}, fmt.Errorf("extended end %s is more than %s from now", until.Format(time.RFC3339), MaxDuration)
 	}
 
-	pid, err := m.start(now, until)
+	pid, err := m.start(now, until, mode)
 	if err != nil {
 		return 0, time.Time{}, err
 	}
@@ -175,8 +185,9 @@ func ResolveTarget(now time.Time, target string) (t time.Time, rolledOver bool, 
 }
 
 // start replaces any running session with a caffeinate process lasting from
-// now until target, and saves its state. It is the only place that runs caffeinate.
-func (m *Manager) start(now, target time.Time) (int, error) {
+// now until target holding mode's assertions, and saves its state. It is the
+// only place that runs caffeinate.
+func (m *Manager) start(now, target time.Time, mode Mode) (int, error) {
 	duration := target.Sub(now)
 	if duration < time.Second {
 		return 0, errors.New("target time is in the past")
@@ -186,7 +197,8 @@ func (m *Manager) start(now, target time.Time) (int, error) {
 		return 0, err
 	}
 
-	cmd := exec.Command(m.caffeinateBinary, "-di", "-t", strconv.FormatInt(int64(duration.Seconds()), 10))
+	mode = mode.orDefault()
+	cmd := exec.Command(m.caffeinateBinary, caffeinateArgs(mode, duration)...)
 	if err := cmd.Start(); err != nil {
 		return 0, fmt.Errorf("failed to start %s: %w", m.caffeinateBinary, err)
 	}
@@ -195,7 +207,7 @@ func (m *Manager) start(now, target time.Time) (int, error) {
 	go func() { _ = cmd.Wait() }()
 
 	pid := cmd.Process.Pid
-	if err := m.saveState(pid, target.Unix()); err != nil {
+	if err := m.writeState(state{PID: pid, Until: target.Unix(), Mode: mode.String()}); err != nil {
 		return 0, fmt.Errorf("failed to persist pid: %w", err)
 	}
 
@@ -235,21 +247,28 @@ func (m *Manager) Cancel() (int, error) {
 }
 
 type state struct {
-	PID   int   `json:"pid"`
-	Until int64 `json:"until"`
+	PID   int    `json:"pid"`
+	Until int64  `json:"until"`
+	Mode  string `json:"mode,omitempty"`
 }
 
 // State represents the exported runtime information of keepawake.
 type State struct {
 	PID   int
 	Until time.Time
+	// Mode is never the zero Mode: files written before modes existed read
+	// back as DefaultMode.
+	Mode Mode
 }
 
+// saveState writes a state file without a mode, like those written before
+// modes existed.
 func (m *Manager) saveState(pid int, until int64) error {
-	payload, err := json.Marshal(state{
-		PID:   pid,
-		Until: until,
-	})
+	return m.writeState(state{PID: pid, Until: until})
+}
+
+func (m *Manager) writeState(s state) error {
+	payload, err := json.Marshal(s)
 	if err != nil {
 		return err
 	}
@@ -306,6 +325,10 @@ func (m *Manager) readState() (*state, error) {
 		return nil, fmt.Errorf("%w: missing or non-positive pid or until in %s", ErrInvalidState, m.stateFilePath)
 	}
 
+	if _, err := parseMode(s.Mode); err != nil {
+		return nil, fmt.Errorf("%w: invalid mode %q in %s", ErrInvalidState, s.Mode, m.stateFilePath)
+	}
+
 	return &s, nil
 }
 
@@ -338,9 +361,12 @@ func (m *Manager) CurrentState() (*State, error) {
 		return nil, ErrStateNotFound
 	}
 
+	// readState has already validated the mode.
+	mode, _ := parseMode(s.Mode)
 	return &State{
 		PID:   s.PID,
 		Until: untilTime,
+		Mode:  mode,
 	}, nil
 }
 

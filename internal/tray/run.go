@@ -11,6 +11,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/jose/keepawake/internal/procutil"
 )
 
 const trayPIDFileName = ".keepawake.tray.pid"
@@ -110,19 +112,7 @@ func trayPIDFilePath() (string, error) {
 }
 
 func alive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	if err := proc.Signal(syscall.Signal(0)); err != nil {
-		return false
-	}
-
-	return true
+	return procutil.Alive(pid)
 }
 
 // ForegroundPIDGuard registers the caller as the active tray process and

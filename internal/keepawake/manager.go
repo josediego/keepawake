@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -19,6 +18,7 @@ type Manager struct {
 	stateFilePath    string
 	caffeinateBinary string
 	now              func() time.Time
+	processes        ProcessController
 }
 
 // Option configures a Manager.
@@ -57,6 +57,13 @@ func WithClock(clock func() time.Time) Option {
 	}
 }
 
+// WithProcessController injects a custom ProcessController (helpful for tests).
+func WithProcessController(pc ProcessController) Option {
+	return func(m *Manager) {
+		m.processes = pc
+	}
+}
+
 // NewManager builds a Manager with sane defaults.
 func NewManager(opts ...Option) (*Manager, error) {
 	defaultStateFile, err := defaultStateFilePath()
@@ -68,6 +75,7 @@ func NewManager(opts ...Option) (*Manager, error) {
 		stateFilePath:    defaultStateFile,
 		caffeinateBinary: "caffeinate",
 		now:              time.Now,
+		processes:        defaultProcessController{},
 	}
 
 	for _, opt := range opts {
@@ -162,13 +170,16 @@ func (m *Manager) Cancel() (int, error) {
 		return 0, err
 	}
 
-	proc, err := os.FindProcess(state.PID)
-	if err != nil {
-		return 0, fmt.Errorf("failed to find process %d: %w", state.PID, err)
+	// Never signal a PID that may have been reused; just discard the stale state.
+	if !m.isLive(state) {
+		if err := m.removeStateFile(); err != nil {
+			return 0, err
+		}
+		return 0, ErrStateNotFound
 	}
 
-	if err := proc.Kill(); err != nil {
-		return 0, fmt.Errorf("failed to kill process %d: %w", state.PID, err)
+	if err := m.processes.Terminate(state.PID); err != nil {
+		return 0, fmt.Errorf("failed to terminate process %d: %w", state.PID, err)
 	}
 
 	if err := m.removeStateFile(); err != nil {
@@ -245,8 +256,8 @@ func (m *Manager) CurrentState() (*State, error) {
 		return nil, ErrStateNotFound
 	}
 
-	// Check if process is still alive
-	if !isProcessAlive(s.PID) {
+	// Check if process is still alive and still caffeinate (the PID may have been reused)
+	if !m.processes.IsCaffeinate(s.PID) {
 		_ = m.removeStateFile()
 		return nil, ErrStateNotFound
 	}
@@ -257,17 +268,10 @@ func (m *Manager) CurrentState() (*State, error) {
 	}, nil
 }
 
-func isProcessAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	// Signal 0 doesn't actually send a signal, but checks if the process exists
-	err = proc.Signal(syscall.Signal(0))
-	return err == nil
+// isLive reports whether s describes a running session: its until has not
+// passed and its PID still belongs to caffeinate.
+func (m *Manager) isLive(s *state) bool {
+	return !m.now().After(time.Unix(s.Until, 0)) && m.processes.IsCaffeinate(s.PID)
 }
 
 func (m *Manager) removeStateFile() error {
@@ -290,10 +294,9 @@ func (m *Manager) cancelExistingSession() error {
 		return err
 	}
 
-	proc, err := os.FindProcess(state.PID)
-	if err == nil {
-		if killErr := proc.Kill(); killErr != nil && !errors.Is(killErr, os.ErrProcessDone) {
-			return fmt.Errorf("failed to terminate prior keepawake process %d: %w", state.PID, killErr)
+	if m.isLive(state) {
+		if err := m.processes.Terminate(state.PID); err != nil {
+			return fmt.Errorf("failed to terminate prior keepawake process %d: %w", state.PID, err)
 		}
 	}
 

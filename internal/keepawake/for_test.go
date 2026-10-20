@@ -25,6 +25,7 @@ func TestFor(t *testing.T) {
 		WithStateFile(filepath.Join(dir, "state")),
 		WithClock(func() time.Time { return now }),
 		WithCaffeinateBinary(script),
+		WithProcessController(&fakeController{}),
 	)
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
@@ -115,6 +116,7 @@ func assertKeepsSession(t *testing.T, call func(m *Manager, now time.Time) error
 		WithStateFile(stateFile),
 		WithClock(func() time.Time { return now }),
 		WithCaffeinateBinary("/nonexistent/caffeinate"),
+		WithProcessController(&fakeController{}),
 	)
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)

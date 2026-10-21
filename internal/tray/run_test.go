@@ -1,6 +1,7 @@
 package tray
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -287,5 +288,85 @@ func TestEnsureStoppedHolderWithoutPID(t *testing.T) {
 	}
 	if len(*signalled) != 0 {
 		t.Fatalf("signalled = %v, want none", *signalled)
+	}
+}
+
+// fakeStartTray replaces startTray with one that registers like a real tray, so no test launches it; it returns the launch count.
+func fakeStartTray(t *testing.T) *int {
+	t.Helper()
+	starts := 0
+	orig := startTray
+	startTray = func() error {
+		starts++
+		cleanup, _, alreadyRunning, err := ForegroundPIDGuard(os.Getpid())
+		if err != nil || alreadyRunning {
+			t.Errorf("ForegroundPIDGuard() alreadyRunning = %v, error = %v", alreadyRunning, err)
+			return errors.New("fake tray did not register")
+		}
+		t.Cleanup(func() { _ = cleanup() })
+		return nil
+	}
+	t.Cleanup(func() { startTray = orig })
+	return &starts
+}
+
+func TestEnsureRunning(t *testing.T) {
+	tests := []struct {
+		name       string
+		setup      func(t *testing.T, path string)
+		wantStarts int
+		held       bool   // a lock holder's file must survive unchanged
+		wantFile   string // its contents
+	}{
+		{name: "no file", wantStarts: 1},
+		{
+			name: "unlocked live unrelated PID",
+			setup: func(t *testing.T, path string) {
+				if err := os.WriteFile(path, []byte(strconv.Itoa(os.Getppid())), 0o600); err != nil {
+					t.Fatalf("failed to write pid file: %v", err)
+				}
+			},
+			wantStarts: 1,
+		},
+		{
+			name:     "lock holder",
+			setup:    func(t *testing.T, path string) { holdTrayLock(t, path, "4242") },
+			held:     true,
+			wantFile: "4242",
+		},
+		{
+			name:  "lock holder without PID yet",
+			setup: func(t *testing.T, path string) { holdTrayLock(t, path, "") },
+			held:  true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := withTempTrayPIDPath(t)
+			signalled := fakeSignalTray(t)
+			starts := fakeStartTray(t)
+			if tt.setup != nil {
+				tt.setup(t, path)
+			}
+
+			if err := EnsureRunning(); err != nil {
+				t.Fatalf("EnsureRunning() error = %v", err)
+			}
+			if *starts != tt.wantStarts {
+				t.Fatalf("starts = %d, want %d", *starts, tt.wantStarts)
+			}
+			if len(*signalled) != 0 {
+				t.Fatalf("signalled = %v, want none", *signalled)
+			}
+			if tt.held {
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatalf("failed to read lock holder's pid file: %v", err)
+				}
+				if got := string(data); got != tt.wantFile {
+					t.Fatalf("pid file contents = %q, want %q", got, tt.wantFile)
+				}
+			}
+		})
 	}
 }

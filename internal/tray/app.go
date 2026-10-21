@@ -10,9 +10,17 @@ import (
 	"github.com/jose/keepawake/internal/keepawake"
 )
 
+// sessionSource reads and stops the session; *keepawake.Manager satisfies it.
+type sessionSource interface {
+	CurrentState() (*keepawake.State, error)
+	Cancel() (int, error)
+}
+
+var _ sessionSource = (*keepawake.Manager)(nil)
+
 // App manages the system tray experience.
 type App struct {
-	manager      *keepawake.Manager
+	manager      sessionSource
 	pollInterval time.Duration
 
 	statusItem *systray.MenuItem
@@ -25,6 +33,10 @@ type App struct {
 	stoppedFromTray bool
 	notifier        Notifier // nil disables notifications
 	quit            func()   // closes the tray; tests replace it
+
+	confirmer   Confirmer
+	quitAnswers chan bool // answers of the quit dialog, read by watchState
+	confirming  bool      // the quit dialog is up
 }
 
 // Option customizes an App.
@@ -38,11 +50,13 @@ func WithoutNotifications() Option {
 }
 
 // NewApp builds a tray application bound to the provided manager.
-func NewApp(manager *keepawake.Manager, opts ...Option) *App {
+func NewApp(manager sessionSource, opts ...Option) *App {
 	a := &App{
 		manager:      manager,
 		pollInterval: 5 * time.Second,
 		notifier:     osascriptNotifier{},
+		confirmer:    osascriptConfirmer{},
+		quitAnswers:  make(chan bool, 1),
 	}
 	a.quit = a.quitTray
 	for _, opt := range opts {
@@ -105,8 +119,13 @@ func (a *App) watchState(ctx context.Context) {
 		case <-a.cancelItem.ClickedCh:
 			timer.Reset(a.handleCancel())
 		case <-a.quitItem.ClickedCh:
-			systray.Quit()
-			return
+			if a.requestQuit(time.Now()) {
+				return
+			}
+		case ok := <-a.quitAnswers:
+			if a.confirmedQuit(ok) {
+				return
+			}
 		case <-ctx.Done():
 			return
 		}

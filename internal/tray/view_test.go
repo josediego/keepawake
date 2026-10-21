@@ -27,6 +27,7 @@ func TestBuildView(t *testing.T) {
 			StatusText:    "Active until " + end + " (" + remaining + " left)",
 			Tooltip:       "Keepawake active until " + end + " (" + remaining + " left)",
 			CancelEnabled: true,
+			QuitEnabled:   true,
 		}
 	}
 	inactive := view{StatusText: "Inactive", Tooltip: "Keepawake inactive", QuitEnabled: true}

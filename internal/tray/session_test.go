@@ -231,7 +231,7 @@ func TestWithoutNotificationsDisablesNotifier(t *testing.T) {
 }
 
 func TestSessionFilesDoNotImportSystray(t *testing.T) {
-	for _, name := range []string{"session.go", "notify.go"} {
+	for _, name := range []string{"session.go", "notify.go", "quit.go", "confirm.go"} {
 		f, err := parser.ParseFile(token.NewFileSet(), name, nil, parser.ImportsOnly)
 		if err != nil {
 			t.Fatalf("parse %s: %v", name, err)

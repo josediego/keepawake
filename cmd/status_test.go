@@ -52,6 +52,21 @@ func TestFormatStatus(t *testing.T) {
 			want:  "Active until 15:00 (0s left, PID 123)",
 		},
 		{
+			name:  "default mode",
+			state: &keepawake.State{PID: 123, Until: time.Date(2026, time.March, 10, 17, 30, 0, 0, statusZone), Mode: keepawake.DefaultMode},
+			want:  "Active until 17:30 (1h 5m left, PID 123)",
+		},
+		{
+			name:  "idle mode",
+			state: &keepawake.State{PID: 7, Until: time.Date(2026, time.March, 10, 17, 30, 0, 0, statusZone), Mode: keepawake.Mode{Idle: true}},
+			want:  "Active until 17:30 (1h 5m left, PID 7, mode i)",
+		},
+		{
+			name:  "all modes",
+			state: &keepawake.State{PID: 123, Until: time.Date(2026, time.March, 10, 17, 30, 0, 0, statusZone), Mode: keepawake.Mode{Display: true, Idle: true, System: true, Disk: true}},
+			want:  "Active until 17:30 (1h 5m left, PID 123, mode dism)",
+		},
+		{
 			name:  "inactive",
 			state: nil,
 			want:  "Inactive",
@@ -81,6 +96,7 @@ func TestStatusJSON(t *testing.T) {
 				"pid":               float64(123),
 				"until":             "2026-03-10T17:30:00-05:00",
 				"remaining_seconds": float64(3900),
+				"mode":              "di",
 			},
 		},
 		{
@@ -91,6 +107,29 @@ func TestStatusJSON(t *testing.T) {
 				"pid":               float64(123),
 				"until":             "2026-03-10T15:00:00-05:00",
 				"remaining_seconds": float64(0),
+				"mode":              "di",
+			},
+		},
+		{
+			name:  "default mode",
+			state: &keepawake.State{PID: 123, Until: time.Date(2026, time.March, 10, 17, 30, 0, 0, statusZone), Mode: keepawake.DefaultMode},
+			want: map[string]any{
+				"active":            true,
+				"pid":               float64(123),
+				"until":             "2026-03-10T17:30:00-05:00",
+				"remaining_seconds": float64(3900),
+				"mode":              "di",
+			},
+		},
+		{
+			name:  "idle and system mode",
+			state: &keepawake.State{PID: 123, Until: time.Date(2026, time.March, 10, 17, 30, 0, 0, statusZone), Mode: keepawake.Mode{Idle: true, System: true}},
+			want: map[string]any{
+				"active":            true,
+				"pid":               float64(123),
+				"until":             "2026-03-10T17:30:00-05:00",
+				"remaining_seconds": float64(3900),
+				"mode":              "is",
 			},
 		},
 		{
@@ -163,7 +202,7 @@ func TestStatusCommand(t *testing.T) {
 			name:    "json active",
 			args:    []string{"--json"},
 			state:   active,
-			wantOut: `{"active":true,"pid":123,"until":"2026-03-10T17:30:00-05:00","remaining_seconds":3900}` + "\n",
+			wantOut: `{"active":true,"pid":123,"until":"2026-03-10T17:30:00-05:00","remaining_seconds":3900,"mode":"di"}` + "\n",
 		},
 		{
 			name:     "json inactive",

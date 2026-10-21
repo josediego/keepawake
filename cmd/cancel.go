@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/jose/keepawake/internal/keepawake"
 	"github.com/spf13/cobra"
 )
 
@@ -12,7 +13,7 @@ func newCancelCommand(deps sessionDeps) *cobra.Command {
 		Short: "Stop the active keepawake session",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cancel := func() (int, error) {
-				manager, err := deps.manager()
+				manager, err := deps.manager(keepawake.Mode{})
 				if err != nil {
 					return 0, err
 				}

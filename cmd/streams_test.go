@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jose/keepawake/internal/keepawake"
 	"github.com/jose/keepawake/internal/tray"
 	"github.com/spf13/cobra"
 )
@@ -23,7 +24,7 @@ func (fakeSession) Cancel() (int, error)                             { return 44
 // fakeSessionDeps builds sessionDeps from fakes, counting launcher runs in *launches and stopper runs in *stops.
 func fakeSessionDeps(launches, stops *int) sessionDeps {
 	return sessionDeps{
-		manager: func() (sessionManager, error) { return fakeSession{}, nil },
+		manager: func(keepawake.Mode) (sessionManager, error) { return fakeSession{}, nil },
 		launchTray: func() error {
 			*launches++
 			return errors.New("boom")

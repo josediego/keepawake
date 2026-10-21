@@ -19,7 +19,7 @@ var _ sessionManager = (*keepawake.Manager)(nil)
 
 // sessionDeps holds what until, for and cancel need from the outside world, so tests can fake them.
 type sessionDeps struct {
-	manager    func() (sessionManager, error)
+	manager    func(keepawake.Mode) (sessionManager, error) // cancel passes the zero Mode; only starts use it
 	launchTray func() error
 	stopTray   func() error
 }
@@ -27,8 +27,8 @@ type sessionDeps struct {
 // defaultSessionDeps builds the manager only when a command runs, so building the commands reads no state.
 func defaultSessionDeps() sessionDeps {
 	return sessionDeps{
-		manager: func() (sessionManager, error) {
-			return keepawake.NewManager()
+		manager: func(mode keepawake.Mode) (sessionManager, error) {
+			return keepawake.NewManager(keepawake.WithMode(mode))
 		},
 		launchTray: tray.EnsureRunning,
 		stopTray:   tray.EnsureStopped,

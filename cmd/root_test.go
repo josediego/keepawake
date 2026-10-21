@@ -11,7 +11,7 @@ import (
 // probeRoot builds the root command with a probe subcommand that calls startTray with launch.
 func probeRoot(launch func() error) *cobra.Command {
 	unused := 0
-	root := newRootCommandWith("test", fakeSessionDeps(&unused))
+	root := newRootCommandWith("test", fakeSessionDeps(&unused, &unused))
 	root.AddCommand(&cobra.Command{
 		Use: "probe",
 		RunE: func(c *cobra.Command, _ []string) error {
@@ -107,8 +107,8 @@ func TestSessionCommandsHonourNoTray(t *testing.T) {
 		for _, tc := range tests {
 			t.Run(cmdName+" "+tc.name, func(t *testing.T) {
 				t.Setenv(noTrayEnv, tc.env)
-				launches := 0
-				root := newRootCommandWith("test", fakeSessionDeps(&launches))
+				launches, stops := 0, 0
+				root := newRootCommandWith("test", fakeSessionDeps(&launches, &stops))
 				var out, errOut bytes.Buffer
 				root.SetOut(&out)
 				root.SetErr(&errOut)

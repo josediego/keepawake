@@ -9,6 +9,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -29,6 +30,17 @@ var ErrStateNotFound = errors.New("no keepawake active (state file not found)")
 
 // ErrInvalidState is returned when the state file exists but is corrupt or incomplete.
 var ErrInvalidState = errors.New("invalid keepawake state file")
+
+// ErrStateBusy is returned when another keepawake holds the state lock for
+// longer than lockWait.
+var ErrStateBusy = errors.New("keepawake state is busy (another keepawake holds the lock)")
+
+// lockWait bounds how long an operation waits for the state lock; tests
+// shorten it.
+var lockWait = 2 * time.Second
+
+// lockPoll is how often a busy state lock is retried.
+const lockPoll = 10 * time.Millisecond
 
 // MinDuration and MaxDuration bound the durations accepted by For and Extend.
 const (
@@ -148,10 +160,16 @@ func (m *Manager) Extend(d time.Duration) (int, time.Time, error) {
 		return 0, time.Time{}, fmt.Errorf("duration %s out of range (%s to %s)", d, MinDuration, MaxDuration)
 	}
 
+	unlock, err := m.lock()
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+	defer unlock()
+
 	now := m.now()
 	until := now.Add(d)
 	mode := m.mode
-	s, err := m.CurrentState()
+	s, err := m.currentState()
 	if err == nil && s.Until.After(now) {
 		until = s.Until.Add(d)
 		mode = s.Mode
@@ -162,7 +180,7 @@ func (m *Manager) Extend(d time.Duration) (int, time.Time, error) {
 		return 0, time.Time{}, fmt.Errorf("extended end %s is more than %s from now", until.Format(time.RFC3339), MaxDuration)
 	}
 
-	pid, err := m.start(now, until, mode)
+	pid, err := m.replace(now, until, mode)
 	if err != nil {
 		return 0, time.Time{}, err
 	}
@@ -184,10 +202,20 @@ func ResolveTarget(now time.Time, target string) (t time.Time, rolledOver bool, 
 	return time.Date(t.Year(), t.Month(), t.Day()+1, t.Hour(), t.Minute(), t.Second(), 0, now.Location()), true, nil
 }
 
-// start replaces any running session with a caffeinate process lasting from
-// now until target holding mode's assertions, and saves its state. It is the
-// only place that runs caffeinate.
+// start runs replace while holding the state lock.
 func (m *Manager) start(now, target time.Time, mode Mode) (int, error) {
+	unlock, err := m.lock()
+	if err != nil {
+		return 0, err
+	}
+	defer unlock()
+	return m.replace(now, target, mode)
+}
+
+// replace replaces any running session with a caffeinate process lasting from
+// now until target holding mode's assertions, and saves its state. It is the
+// only place that runs caffeinate. The caller must hold the state lock.
+func (m *Manager) replace(now, target time.Time, mode Mode) (int, error) {
 	duration := target.Sub(now)
 	if duration < time.Second {
 		return 0, errors.New("target time is in the past")
@@ -216,6 +244,12 @@ func (m *Manager) start(now, target time.Time, mode Mode) (int, error) {
 
 // Cancel terminates the running caffeinate session (if any).
 func (m *Manager) Cancel() (int, error) {
+	unlock, err := m.lock()
+	if err != nil {
+		return 0, err
+	}
+	defer unlock()
+
 	state, err := m.readState()
 	if err != nil {
 		if errors.Is(err, ErrInvalidState) {
@@ -335,6 +369,18 @@ func (m *Manager) readState() (*state, error) {
 // CurrentState returns the exported state information if present.
 // It automatically cleans up stale state if the time has passed or the process is dead.
 func (m *Manager) CurrentState() (*State, error) {
+	unlock, err := m.lock()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	return m.currentState()
+}
+
+// currentState is CurrentState for callers that already hold the state lock.
+// flock is per open file, so taking the lock again in the same process would
+// deadlock.
+func (m *Manager) currentState() (*State, error) {
 	s, err := m.readState()
 	if err != nil {
 		if errors.Is(err, ErrInvalidState) {
@@ -374,6 +420,41 @@ func (m *Manager) CurrentState() (*State, error) {
 // passed and its PID still belongs to caffeinate.
 func (m *Manager) isLive(s *state) bool {
 	return !m.now().After(time.Unix(s.Until, 0)) && m.processes.IsCaffeinate(s.PID)
+}
+
+// lock takes an exclusive flock on <state file>.lock, waiting at most
+// lockWait, and returns the function that releases it. The lock file is never
+// removed. os.OpenFile sets close-on-exec, so caffeinate never inherits the
+// lock. Each call opens the file anew, so two Managers conflict like two
+// processes do.
+func (m *Manager) lock() (func(), error) {
+	f, err := os.OpenFile(m.stateFilePath+".lock", os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	deadline := time.Now().Add(lockWait)
+	for {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			break
+		}
+		if errors.Is(err, syscall.EINTR) {
+			continue
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) {
+			_ = f.Close()
+			return nil, err
+		}
+		if !time.Now().Before(deadline) {
+			_ = f.Close()
+			return nil, ErrStateBusy
+		}
+		time.Sleep(lockPoll)
+	}
+	return func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+	}, nil
 }
 
 func (m *Manager) removeStateFile() error {

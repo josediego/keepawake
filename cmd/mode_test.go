@@ -46,7 +46,7 @@ func TestModeFlags(t *testing.T) {
 
 // recordingSessionDeps builds sessionDeps whose manager records each Mode it is given in *modes.
 func recordingSessionDeps(modes *[]keepawake.Mode, launches *int) sessionDeps {
-	deps := fakeSessionDeps(launches)
+	deps := fakeSessionDeps(launches, new(int))
 	deps.manager = func(m keepawake.Mode) (sessionManager, error) {
 		*modes = append(*modes, m)
 		return fakeSession{}, nil
@@ -103,7 +103,7 @@ func TestSessionCommandsModeFlags(t *testing.T) {
 
 	for cmdName, newCmd := range commands {
 		launches := 0
-		c := newCmd(fakeSessionDeps(&launches))
+		c := newCmd(fakeSessionDeps(&launches, new(int)))
 		for _, f := range flags {
 			flag := c.Flags().Lookup(f.name)
 			if flag == nil {
@@ -161,7 +161,7 @@ func TestHelpAndVersionStillWork(t *testing.T) {
 		{"-v"},
 	} {
 		launches := 0
-		root := newRootCommandWith("test", fakeSessionDeps(&launches))
+		root := newRootCommandWith("test", fakeSessionDeps(&launches, new(int)))
 		var out, errOut bytes.Buffer
 		root.SetOut(&out)
 		root.SetErr(&errOut)

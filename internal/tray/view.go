@@ -43,6 +43,7 @@ func buildView(state *keepawake.State, err error, now time.Time) view {
 		StatusText:    fmt.Sprintf("Active until %s (%s left)", end, remaining),
 		Tooltip:       fmt.Sprintf("Keepawake active until %s (%s left)", end, remaining),
 		CancelEnabled: true,
+		QuitEnabled:   true,
 	}
 }
 

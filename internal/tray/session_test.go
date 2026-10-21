@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"testing"
 	"time"
@@ -135,6 +136,91 @@ func TestNotifyUsesNotifier(t *testing.T) {
 	}
 }
 
+type recordingNotifier struct {
+	events *[]string
+}
+
+func (r recordingNotifier) Notify(_, msg string) error {
+	*r.events = append(*r.events, "notify: "+msg)
+	return nil
+}
+
+func TestReactSequence(t *testing.T) {
+	start := time.Date(2026, 10, 20, 16, 0, 0, 0, time.UTC)
+	until := start.Add(time.Hour)
+
+	tests := []struct {
+		name     string
+		endAt    time.Time
+		selfStop bool
+		want     []string
+	}{
+		{"expiry", until.Add(time.Second), false, []string{"notify: " + msgFinished, "quit"}},
+		{"early end", start.Add(10 * time.Minute), false, []string{"notify: " + msgStoppedEarly, "quit"}},
+		{"tray's own stop", start.Add(10 * time.Minute), true, []string{"quit"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var events []string
+			a := &App{
+				pollInterval: 5 * time.Second,
+				notifier:     recordingNotifier{events: &events},
+				quit:         func() { events = append(events, "quit") },
+			}
+
+			before := []struct {
+				name  string
+				state *keepawake.State
+				err   error
+				now   time.Time
+			}{
+				{"idle at start", nil, keepawake.ErrStateNotFound, start.Add(-time.Minute)},
+				{"session starts", &keepawake.State{PID: 1, Until: until}, nil, start},
+				{"failed read", nil, errors.New("boom"), start.Add(time.Minute)},
+			}
+			for _, s := range before {
+				if a.react(s.state, s.err, s.now) || len(events) != 0 {
+					t.Fatalf("%s: react() quit or reported %v before the end", s.name, events)
+				}
+			}
+
+			if tt.selfStop {
+				a.stoppedFromTray = true
+			}
+			if !a.react(nil, keepawake.ErrStateNotFound, tt.endAt) {
+				t.Fatal("react(end) = false, want true")
+			}
+			if !reflect.DeepEqual(events, tt.want) {
+				t.Errorf("events = %q, want %q", events, tt.want)
+			}
+		})
+	}
+}
+
+func TestNextRefresh(t *testing.T) {
+	const poll = 5 * time.Second
+	now := time.Date(2026, 10, 20, 16, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name string
+		cur  session
+		want time.Duration
+	}{
+		{"idle", session{}, poll},
+		{"far from the end", session{Active: true, Until: now.Add(time.Hour)}, poll},
+		{"end within one poll", session{Active: true, Until: now.Add(2 * time.Second)}, 3 * time.Second},
+		{"end just passed", session{Active: true, Until: now.Add(-500 * time.Millisecond)}, 500 * time.Millisecond},
+		{"end already past", session{Active: true, Until: now.Add(-10 * time.Second)}, 100 * time.Millisecond},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := nextRefresh(tt.cur, now, poll); got != tt.want {
+				t.Errorf("nextRefresh() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestWithoutNotificationsDisablesNotifier(t *testing.T) {
 	if a := NewApp(nil); a.notifier == nil {
 		t.Error("NewApp() has no notifier, want the default")
@@ -145,7 +231,7 @@ func TestWithoutNotificationsDisablesNotifier(t *testing.T) {
 }
 
 func TestSessionFilesDoNotImportSystray(t *testing.T) {
-	for _, name := range []string{"session.go", "notify.go"} {
+	for _, name := range []string{"session.go", "notify.go", "quit.go", "confirm.go"} {
 		f, err := parser.ParseFile(token.NewFileSet(), name, nil, parser.ImportsOnly)
 		if err != nil {
 			t.Fatalf("parse %s: %v", name, err)

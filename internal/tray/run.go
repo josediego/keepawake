@@ -154,8 +154,36 @@ func writeLockedPID(f *os.File, pid int) error {
 	return err
 }
 
-// EnsureStopped terminates background tray process if running.
+// signalTray sends sig to pid; tests override it.
+var signalTray = syscall.Kill
+
+// EnsureStopped terminates the background tray if one is running. It signals
+// only a tray that holds the PID file lock; an unlocked file is stale and is
+// removed without signalling its PID, which may belong to another process.
 func EnsureStopped() error {
+	path, err := trayPIDPath()
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer f.Close()
+
+	fd := int(f.Fd())
+	if err := syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
+		// Remove while still holding the lock so no contender locks the old inode.
+		removeErr := removeTrayPID()
+		_ = syscall.Flock(fd, syscall.LOCK_UN)
+		return removeErr
+	} else if !errors.Is(err, syscall.EWOULDBLOCK) {
+		return fmt.Errorf("tray: lock pid file: %w", err)
+	}
+
 	pid, err := readTrayPID()
 	if err != nil {
 		if errors.Is(err, errPIDNotFound) {
@@ -163,9 +191,12 @@ func EnsureStopped() error {
 		}
 		return err
 	}
-	proc, err := os.FindProcess(pid)
-	if err == nil {
-		_ = proc.Signal(syscall.SIGTERM)
+	if pid <= 0 {
+		// kill(-N) would signal a whole process group.
+		return fmt.Errorf("tray: invalid pid %d", pid)
+	}
+	if err := signalTray(pid, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
+		return fmt.Errorf("tray: signal pid %d: %w", pid, err)
 	}
 	return removeTrayPID()
 }

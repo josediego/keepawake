@@ -19,16 +19,21 @@ const trayPIDFileName = ".keepawake.tray.pid"
 
 // EnsureRunning starts the tray process in the background if it's not active yet.
 func EnsureRunning() error {
-	pid, err := readTrayPID()
-	if err == nil {
-		if alive(pid) {
-			return nil
-		}
-		_ = removeTrayPID()
-	} else if !errors.Is(err, errPIDNotFound) {
+	running, err := trayRunning()
+	if err != nil {
 		return err
 	}
+	if running {
+		return nil
+	}
+	if err := startTray(); err != nil {
+		return err
+	}
+	return waitForTrayReady(3 * time.Second)
+}
 
+// startTray launches the background tray process; tests override it.
+var startTray = func() error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("tray: resolve executable: %w", err)
@@ -49,8 +54,35 @@ func EnsureRunning() error {
 	}
 
 	_ = cmd.Process.Release()
+	return nil
+}
 
-	return waitForTrayReady(3 * time.Second)
+// trayRunning reports whether a tray holds the PID file lock, whatever PID
+// the file has (or none yet). An unlocked file is stale and is removed.
+func trayRunning() (bool, error) {
+	path, err := trayPIDPath()
+	if err != nil {
+		return false, err
+	}
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	defer f.Close()
+
+	fd := int(f.Fd())
+	if err := syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
+		// Remove while still holding the lock so no contender locks the old inode.
+		removeErr := removeTrayPID()
+		_ = syscall.Flock(fd, syscall.LOCK_UN)
+		return false, removeErr
+	} else if !errors.Is(err, syscall.EWOULDBLOCK) {
+		return false, fmt.Errorf("tray: lock pid file: %w", err)
+	}
+	return true, nil
 }
 
 var errPIDNotFound = errors.New("tray pid not found")
@@ -161,27 +193,9 @@ var signalTray = syscall.Kill
 // only a tray that holds the PID file lock; an unlocked file is stale and is
 // removed without signalling its PID, which may belong to another process.
 func EnsureStopped() error {
-	path, err := trayPIDPath()
-	if err != nil {
+	running, err := trayRunning()
+	if err != nil || !running {
 		return err
-	}
-	f, err := os.OpenFile(path, os.O_RDWR, 0)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	defer f.Close()
-
-	fd := int(f.Fd())
-	if err := syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
-		// Remove while still holding the lock so no contender locks the old inode.
-		removeErr := removeTrayPID()
-		_ = syscall.Flock(fd, syscall.LOCK_UN)
-		return removeErr
-	} else if !errors.Is(err, syscall.EWOULDBLOCK) {
-		return fmt.Errorf("tray: lock pid file: %w", err)
 	}
 
 	pid, err := readTrayPID()
